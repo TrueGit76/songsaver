@@ -94,6 +94,7 @@ function shopLinks(term, kind) {
     link(`https://bandcamp.com/search?q=${q}&item_type=${kind === 'album' ? 'a' : 't'}`, 'Bandcamp'),
     link(`https://www.${AMAZON_DOMAIN[state.country]}/s?k=${q}&i=digital-music`, 'Amazon'),
     link(`https://www.qobuz.com/${QOBUZ_LOCALE[state.country]}/search?q=${q}`, 'Qobuz'),
+    link(`https://www.youtube.com/results?search_query=${q}`, 'YouTube'),
   );
 }
 
