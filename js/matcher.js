@@ -74,32 +74,54 @@ export function groupByAlbum(tracks) {
   return [...groups.values()];
 }
 
+export function albumTerm(group) {
+  return `${group.albumArtists[0] ?? ''} ${cleanTitle(group.album)}`.trim();
+}
+
+export function songTerm(track) {
+  return `${track.artists[0] ?? ''} ${cleanTitle(track.name)}`.trim();
+}
+
+/** Zweiter Suchbegriff ohne jeden Klammerzusatz, z. B. "(Radio Edit)" oder "- Live"; null, wenn identisch. */
+function bareSongTerm(track) {
+  const bare = track.name.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '').trim();
+  return bare && bare !== cleanTitle(track.name) ? `${track.artists[0] ?? ''} ${bare}`.trim() : null;
+}
+
+/** Titel desselben Albums lohnen eine Album-Abfrage (2 Anfragen statt einer pro Titel). */
+function usesAlbumLookup(group) {
+  return group.tracks.length >= 2 && Boolean(group.album);
+}
+
+export function pickBestAlbum(group, albums) {
+  const best = albums
+    .filter(a => a.collectionType === 'Album')
+    .map(cand => ({ cand, score: scoreAlbum(group, cand) }))
+    .sort((x, y) => y.score - x.score)[0];
+  return best && best.score >= ACCEPT_ALBUM ? best.cand : null;
+}
+
 /**
- * Sucht alle Titel im iTunes Store.
- * Titel desselben Albums werden möglichst über eine Album-Abfrage gefunden (spart Anfragen).
+ * Sucht die Titel im iTunes Store und meldet jedes Ergebnis sofort über onResult.
+ * Mit einem AbortSignal lässt sich die Suche anhalten (wirft dann einen AbortError).
  * @returns {Promise<Array<{track, match, score, confidence, via}>>} in Playlist-Reihenfolge
  */
-export async function matchPlaylist(tracks, client, onProgress = () => {}) {
+export async function matchPlaylist(tracks, client, { onResult = () => {}, signal } = {}) {
+  client.signal = signal ?? null;
   const results = new Map();
-  let done = 0;
   const report = (track, result) => {
     results.set(track.id, result);
-    done++;
-    onProgress(done, tracks.length, track);
+    onResult(result, results.size, tracks.length);
   };
 
   for (const group of groupByAlbum(tracks)) {
+    signal?.throwIfAborted();
     let remaining = group.tracks;
 
-    if (group.tracks.length >= 2 && group.album) {
-      const albumTerm = `${group.albumArtists[0] ?? ''} ${cleanTitle(group.album)}`.trim();
-      const albums = (await client.searchAlbums(albumTerm)).filter(a => a.collectionType === 'Album');
-      const bestAlbum = albums
-        .map(cand => ({ cand, score: scoreAlbum(group, cand) }))
-        .sort((x, y) => y.score - x.score)[0];
-
-      if (bestAlbum && bestAlbum.score >= ACCEPT_ALBUM) {
-        const albumTracks = await client.albumWithTracks(bestAlbum.cand.collectionId);
+    if (usesAlbumLookup(group)) {
+      const album = pickBestAlbum(group, await client.searchAlbums(albumTerm(group)));
+      if (album) {
+        const albumTracks = await client.albumWithTracks(album.collectionId);
         remaining = [];
         for (const track of group.tracks) {
           const best = pickBestSong(track, albumTracks);
@@ -113,15 +135,12 @@ export async function matchPlaylist(tracks, client, onProgress = () => {}) {
     }
 
     for (const track of remaining) {
-      const artist = track.artists[0] ?? '';
-      let best = pickBestSong(track, await client.searchSongs(`${artist} ${cleanTitle(track.name)}`));
-      if (!best || best.score < ACCEPT_SONG) {
-        // Zweiter Versuch ohne jeden Klammerzusatz, z. B. "(Radio Edit)" oder "- Live".
-        const bare = track.name.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '').trim();
-        if (bare && bare !== cleanTitle(track.name)) {
-          const retry = pickBestSong(track, await client.searchSongs(`${artist} ${bare}`));
-          if (retry && (!best || retry.score > best.score)) best = retry;
-        }
+      signal?.throwIfAborted();
+      let best = pickBestSong(track, await client.searchSongs(songTerm(track)));
+      const bare = bareSongTerm(track);
+      if ((!best || best.score < ACCEPT_SONG) && bare) {
+        const retry = pickBestSong(track, await client.searchSongs(bare));
+        if (retry && (!best || retry.score > best.score)) best = retry;
       }
       const ok = best && best.score >= ACCEPT_SONG;
       report(track, {
@@ -136,6 +155,33 @@ export async function matchPlaylist(tracks, client, onProgress = () => {}) {
   }
 
   return tracks.map(t => results.get(t.id));
+}
+
+/**
+ * Schätzt, wie viele Anfragen an iTunes nötig sind – nach demselben Vorgehen wie matchPlaylist,
+ * aber nur mit Blick in den Cache. Zweite Suchversuche und Album-Ausreißer sind nicht vorhersehbar,
+ * daher ist das eine Untergrenze, die in der Praxis gut passt.
+ */
+export async function estimateRequests(tracks, client) {
+  let count = 0;
+  for (const group of groupByAlbum(tracks)) {
+    if (usesAlbumLookup(group)) {
+      const albums = await client.peekAlbums(albumTerm(group));
+      if (!albums) {
+        count += 2;
+        continue;
+      }
+      const album = pickBestAlbum(group, albums);
+      if (album) {
+        if (!(await client.peekAlbumTracks(album.collectionId))) count += 1;
+        continue;
+      }
+    }
+    for (const track of group.tracks) {
+      if (!(await client.peekSongs(songTerm(track)))) count += 1;
+    }
+  }
+  return count;
 }
 
 export function withStoreParam(url) {

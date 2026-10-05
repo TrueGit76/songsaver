@@ -6,8 +6,8 @@ import { matchPlaylist, buildPurchasePlan } from '../js/matcher.js';
 
 const [file = 'samples/beispiel-playlist.csv', country = 'de'] = process.argv.slice(2);
 const tracks = parsePlaylistCsv(readFileSync(file, 'utf8'));
-const client = new ItunesClient({ country, storage: null, onWait: (ms, why) => console.log(`… ${why} (${ms / 1000}s)`) });
-const results = await matchPlaylist(tracks, client, (d, n, t) => process.stdout.write(`\r${d}/${n} ${t.name.slice(0, 40).padEnd(40)}`));
+const client = new ItunesClient({ country, onWait: (ms, why) => console.log(`… ${why} (${ms / 1000}s)`) });
+const results = await matchPlaylist(tracks, client, { onResult: (r, d, n) => process.stdout.write(`\r${d}/${n} ${r.track.name.slice(0, 40).padEnd(40)}`) });
 console.log(`\n${client.requestCount} Anfragen\n`);
 for (const r of results) {
   const m = r.match ?? r.candidate;

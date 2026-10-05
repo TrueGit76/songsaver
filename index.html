@@ -58,6 +58,7 @@
     <section class="card" id="search" hidden>
       <h2>2. Preise suchen</h2>
       <p id="playlist-summary"></p>
+      <p class="estimate" id="estimate" aria-live="polite"></p>
       <div class="row">
         <label class="field">
           <span>Store-Land</span>
@@ -71,6 +72,10 @@
         </label>
         <button type="button" class="primary" id="start">Preise suchen</button>
       </div>
+      <label class="check">
+        <input type="checkbox" id="notify">
+        Benachrichtigen, wenn die Suche fertig ist (Tab muss offen bleiben)
+      </label>
       <div class="progress" id="progress" hidden>
         <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
         <p class="progress-text" id="progress-text" aria-live="polite"></p>
@@ -78,30 +83,29 @@
       <p class="error" id="search-error" hidden></p>
     </section>
 
-    <section id="results" hidden>
-      <div class="card">
-        <h2>3. Einkaufsliste</h2>
-        <div class="stats" id="stats"></div>
-        <ul class="purchase-list" id="purchase-list"></ul>
-      </div>
+    <section class="card" id="purchase" hidden>
+      <h2>3. Einkaufsliste</h2>
+      <p class="hint" id="purchase-note" hidden>Die Suche ist noch nicht abgeschlossen – die Liste ist vorläufig.</p>
+      <div class="stats" id="stats"></div>
+      <ul class="purchase-list" id="purchase-list"></ul>
+    </section>
 
-      <div class="card">
-        <h2>Alle Titel</h2>
-        <p class="hint">Hake Titel ab, die du schon besitzt – sie werden dann nicht mehr eingerechnet.</p>
-        <div class="table-scroll">
-          <table class="tracks">
-            <thead>
-              <tr>
-                <th scope="col" class="col-owned">Habe ich</th>
-                <th scope="col">Titel aus der Playlist</th>
-                <th scope="col">Gefunden bei iTunes</th>
-                <th scope="col" class="col-num">Preis</th>
-                <th scope="col">Andere Shops</th>
-              </tr>
-            </thead>
-            <tbody id="track-rows"></tbody>
-          </table>
-        </div>
+    <section class="card" id="tracks" hidden>
+      <h2>Alle Titel</h2>
+      <p class="hint">Hake Titel ab, die du schon besitzt – sie werden nicht gesucht und nicht eingerechnet.</p>
+      <div class="table-scroll">
+        <table class="tracks">
+          <thead>
+            <tr>
+              <th scope="col" class="col-owned">Habe ich</th>
+              <th scope="col">Titel aus der Playlist</th>
+              <th scope="col">Gefunden bei iTunes</th>
+              <th scope="col" class="col-num">Preis</th>
+              <th scope="col">Andere Shops</th>
+            </tr>
+          </thead>
+          <tbody id="track-rows"></tbody>
+        </table>
       </div>
     </section>
   </main>

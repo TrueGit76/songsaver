@@ -1,0 +1,70 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { ItunesClient } from '../js/itunes.js';
+import { memoryStore } from '../js/store.js';
+import { matchPlaylist, estimateRequests } from '../js/matcher.js';
+
+const song = (o) => ({ wrapperType: 'track', kind: 'song', trackName: 'Song', artistName: 'Band', collectionName: 'Platte', collectionId: 7, trackTimeMillis: 200_000, trackPrice: 1.29, collectionPrice: 9.99, currency: 'EUR', trackViewUrl: 'https://x/1', ...o });
+const track = (name, album = 'Platte', n = 1) => ({ id: `${album}-${name}`, name, artists: ['Band'], album, albumArtists: ['Band'], albumKey: album, trackNumber: n, durationMs: 200_000 });
+
+// Fake-iTunes: beantwortet Album-Suche, Album-Lookup und Song-Suche.
+function fakeFetch(log) {
+  return async (url) => {
+    log.push(url);
+    const u = new URL(url);
+    let results = [];
+    if (u.pathname === '/search' && u.searchParams.get('entity') === 'album') {
+      results = [{ collectionType: 'Album', collectionId: 7, collectionName: 'Platte', artistName: 'Band', trackCount: 3 }];
+    } else if (u.pathname === '/lookup') {
+      results = ['Eins', 'Zwei', 'Drei'].map(n => song({ trackName: n, extraField: 'wird verworfen' }));
+    } else {
+      const term = u.searchParams.get('term');
+      results = [song({ trackName: term.replace('Band ', ''), collectionName: 'Single', collectionId: 99 })];
+    }
+    return { ok: true, status: 200, json: async () => ({ results }) };
+  };
+}
+
+const albumTracks = [track('Eins', 'Platte', 1), track('Zwei', 'Platte', 2), track('Drei', 'Platte', 3)];
+const single = track('Solo', 'Single');
+
+function client(store, log) {
+  return new ItunesClient({ country: 'de', store, fetch: fakeFetch(log), sleep: async () => {}, minIntervalMs: 0 });
+}
+
+test('Schätzung: Album = 2 Anfragen, Einzeltitel = 1; danach alles im Cache', async () => {
+  const store = memoryStore();
+  const log = [];
+  const c = client(store, log);
+  const tracks = [...albumTracks, single];
+
+  assert.equal(await estimateRequests(tracks, c), 3);
+  await matchPlaylist(tracks, c);
+  assert.equal(log.length, 3, 'Schätzung entspricht den tatsächlichen Anfragen');
+  assert.equal(await estimateRequests(tracks, c), 0);
+});
+
+test('Cache: zweite Suche ohne Anfrage, nur benötigte Felder gespeichert', async () => {
+  const store = memoryStore();
+  const log = [];
+  await matchPlaylist(albumTracks, client(store, log));
+  const before = log.length;
+  const results = await matchPlaylist(albumTracks, client(store, log));
+  assert.equal(log.length, before);
+  assert.ok(results.every(r => r.match));
+  assert.equal(results[0].match.extraField, undefined);
+});
+
+test('Pause: Suche stoppt mit AbortError, bisherige Ergebnisse sind gemeldet', async () => {
+  const controller = new AbortController();
+  const seen = [];
+  const tracks = [track('A', 'X'), track('B', 'Y'), track('C', 'Z')];
+  await assert.rejects(
+    matchPlaylist(tracks, client(memoryStore(), []), {
+      signal: controller.signal,
+      onResult: (r) => { seen.push(r.track.name); if (seen.length === 1) controller.abort(); },
+    }),
+    { name: 'AbortError' },
+  );
+  assert.deepEqual(seen, ['A']);
+});

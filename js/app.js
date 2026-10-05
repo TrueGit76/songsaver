@@ -1,9 +1,12 @@
 import { loadPlaylistFiles, mergePlaylists } from './playlists.js';
-import { ItunesClient } from './itunes.js';
-import { matchPlaylist, buildPurchasePlan, withStoreParam } from './matcher.js';
+import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
+import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam } from './matcher.js';
+import { openStore, memoryStore } from './store.js';
 
 const OWNED_KEY = 'songsaver:owned';
 const COUNTRY_KEY = 'songsaver:country';
+const NOTIFY_KEY = 'songsaver:notify';
+const APP_TITLE = document.title;
 
 const AMAZON_DOMAIN = { de: 'amazon.de', at: 'amazon.de', ch: 'amazon.de', gb: 'amazon.co.uk', us: 'amazon.com' };
 const QOBUZ_LOCALE = { de: 'de-de', at: 'at-de', ch: 'ch-de', gb: 'gb-en', us: 'us-en' };
@@ -11,11 +14,14 @@ const QOBUZ_LOCALE = { de: 'de-de', at: 'at-de', ch: 'ch-de', gb: 'gb-en', us: '
 const $ = id => document.getElementById(id);
 
 const state = {
-  tracks: [],
-  playlists: [],
-  results: null,
+  tracks: [],          // aktuell ausgewählte Titel
+  summary: '',
+  playlists: [],       // Kandidaten in der Playlist-Auswahl
+  results: new Map(),  // Track-ID -> Suchergebnis (für state.country)
   country: 'de',
   owned: loadOwned(),
+  running: null,       // AbortController der laufenden Suche
+  store: memoryStore(),
 };
 
 // ---------- Hilfsfunktionen ----------
@@ -50,12 +56,30 @@ function money(value, currency) {
   }
 }
 
+function duration(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s <= 5 ? 'wenige Sekunden' : `ca. ${s} Sekunden`;
+  const min = Math.round(s / 60);
+  if (min < 60) return `ca. ${min} ${min === 1 ? 'Minute' : 'Minuten'}`;
+  const h = Math.floor(min / 60);
+  const rest = min % 60;
+  return `ca. ${h} Std.${rest ? ` ${rest} Min.` : ''}`;
+}
+
+function local(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch { /* nur Komfort */ }
+  return null;
+}
+
 function loadOwned() {
-  try { return new Set(JSON.parse(localStorage.getItem(OWNED_KEY) ?? '[]')); } catch { return new Set(); }
+  try { return new Set(JSON.parse(local(OWNED_KEY) ?? '[]')); } catch { return new Set(); }
 }
 
 function saveOwned() {
-  try { localStorage.setItem(OWNED_KEY, JSON.stringify([...state.owned])); } catch { /* nur Komfort */ }
+  local(OWNED_KEY, JSON.stringify([...state.owned]));
 }
 
 function showError(id, message) {
@@ -73,23 +97,97 @@ function shopLinks(term, kind) {
   );
 }
 
+function newClient(extra = {}) {
+  return new ItunesClient({ country: state.country, store: state.store, ...extra });
+}
+
+/** Titel, die noch gesucht werden müssen (nicht im Besitz, noch kein Ergebnis). */
+function pendingTracks(tracks = state.tracks) {
+  return tracks.filter(t => !state.owned.has(t.id) && !state.results.has(t.id));
+}
+
+// ---------- Sitzung speichern (Titel und Ergebnisse überstehen Neuladen) ----------
+
+async function saveTracks() {
+  try {
+    await state.store.set('session', 'tracks', { tracks: state.tracks, summary: state.summary });
+  } catch { /* nur Komfort */ }
+}
+
+let resultsSaveTimer = null;
+function saveResults(now = false) {
+  clearTimeout(resultsSaveTimer);
+  const write = async () => {
+    try {
+      await state.store.set('session', 'results', { country: state.country, results: [...state.results.values()] });
+    } catch { /* nur Komfort */ }
+  };
+  if (now) return write();
+  resultsSaveTimer = setTimeout(write, 1500);
+  return null;
+}
+
+async function restoreSession() {
+  try {
+    const saved = await state.store.get('session', 'tracks');
+    if (!saved?.tracks?.length) return false;
+    const res = await state.store.get('session', 'results');
+    if (res?.country === state.country) {
+      for (const r of res.results) state.results.set(r.track.id, r);
+    }
+    showTracks(saved.tracks, saved.summary);
+    const done = saved.tracks.filter(t => state.results.has(t.id)).length;
+    if (done) {
+      $('progress').hidden = false;
+      $('progress-fill').style.width = `${Math.round((done / saved.tracks.length) * 100)}%`;
+      $('progress-text').textContent = `Letzte Sitzung wiederhergestellt: ${done} von ${saved.tracks.length} Titeln bereits gesucht.`;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------- Zeitschätzung ----------
+
+let estimateRun = 0;
+
+/** Berechnet die Suchdauer für die aktuelle Auswahl neu (Cache-Treffer zählen nicht). */
+async function updateEstimate() {
+  if (state.running) return;
+  const run = ++estimateRun;
+  const pending = pendingTracks();
+  const button = $('start');
+  button.textContent = state.results.size ? 'Weitersuchen' : 'Preise suchen';
+  button.disabled = !pending.length;
+
+  if (!pending.length) {
+    $('estimate').textContent = state.tracks.length ? 'Alle Titel sind gesucht.' : '';
+    return;
+  }
+  $('estimate').textContent = `${pending.length} Titel zu suchen – Dauer wird berechnet …`;
+  const requests = await estimateRequests(pending, newClient());
+  if (run !== estimateRun) return; // inzwischen neue Auswahl
+  $('estimate').textContent = requests
+    ? `${pending.length} Titel zu suchen – Dauer ${duration(requests * MIN_INTERVAL_MS)} (${requests} ${requests === 1 ? 'Anfrage' : 'Anfragen'} an iTunes).`
+    : `${pending.length} Titel zu suchen – alles zwischengespeichert, dauert nur Sekunden.`;
+}
+
 // ---------- Import ----------
 
-function loadTracks(tracks, summary) {
+function showTracks(tracks, summary) {
   state.tracks = tracks;
-  state.results = null;
-  $('results').hidden = true;
-  $('progress').hidden = true;
-  showError('search-error', null);
-
+  state.summary = summary;
   const albums = new Set(tracks.map(t => t.albumKey)).size;
   $('playlist-summary').textContent =
     `${summary}: ${tracks.length} Titel von ${albums} ${albums === 1 ? 'Album' : 'Alben'}.`;
   $('search').hidden = false;
-  $('start').focus();
+  renderResults();
+  updateEstimate();
 }
 
 function applyPlaylists(playlists) {
+  if (state.running) return;
   const { tracks, duplicates } = mergePlaylists(playlists);
   if (!tracks.length) {
     showError('import-error', 'Die gewählten Playlists enthalten keine Titel.');
@@ -97,12 +195,22 @@ function applyPlaylists(playlists) {
   }
   let summary = playlists.length === 1 ? `„${playlists[0].name}“` : `${playlists.length} Playlists`;
   if (duplicates) summary += ` (${duplicates} doppelte Titel nur einmal gezählt)`;
-  loadTracks(tracks, summary);
+
+  // Bereits gesuchte Titel behalten, falls sie wieder dabei sind.
+  const ids = new Set(tracks.map(t => t.id));
+  for (const id of [...state.results.keys()]) if (!ids.has(id)) state.results.delete(id);
+
+  $('progress').hidden = true;
+  showError('search-error', null);
+  showTracks(tracks, summary);
+  saveTracks();
+  saveResults(true);
+  $('start').focus();
 }
 
 async function readFiles(fileList) {
   const files = [...(fileList ?? [])];
-  if (!files.length) return;
+  if (!files.length || state.running) return;
   showError('import-error', null);
   $('picker').hidden = true;
 
@@ -113,7 +221,6 @@ async function readFiles(fileList) {
 
   if (!usable.length) {
     if (!errors.length) showError('import-error', 'Keine Titel gefunden.');
-    $('search').hidden = true;
     return;
   }
   if (usable.length === 1) applyPlaylists(usable);
@@ -122,8 +229,6 @@ async function readFiles(fileList) {
 
 function showPicker(playlists) {
   state.playlists = playlists;
-  $('search').hidden = true;
-  $('results').hidden = true;
   $('picker-title').textContent = `${playlists.length} Playlists gefunden – welche möchtest du kaufen?`;
   $('picker-filter').value = '';
 
@@ -143,11 +248,26 @@ function pickerBoxes(visibleOnly = false) {
     .map(li => li.querySelector('input'));
 }
 
-function updatePickerCount() {
-  const chosen = pickerBoxes().filter(b => b.checked).map(b => state.playlists[Number(b.value)]);
-  const titles = chosen.reduce((n, p) => n + p.tracks.length, 0);
-  $('picker-count').textContent = chosen.length ? `${chosen.length} ausgewählt, ${titles} Titel` : 'Nichts ausgewählt';
+function chosenPlaylists() {
+  return pickerBoxes().filter(b => b.checked).map(b => state.playlists[Number(b.value)]);
+}
+
+let pickerRun = 0;
+
+async function updatePickerCount() {
+  const run = ++pickerRun;
+  const chosen = chosenPlaylists();
   $('picker-apply').disabled = !chosen.length;
+  if (!chosen.length) {
+    $('picker-count').textContent = 'Nichts ausgewählt';
+    return;
+  }
+  const { tracks } = mergePlaylists(chosen);
+  const base = `${chosen.length} ausgewählt, ${tracks.length} Titel`;
+  $('picker-count').textContent = base;
+  const requests = await estimateRequests(pendingTracks(tracks), newClient());
+  if (run !== pickerRun) return;
+  $('picker-count').textContent = `${base} – Suche ${requests ? duration(requests * MIN_INTERVAL_MS) : 'nur wenige Sekunden'}`;
 }
 
 function setupPicker() {
@@ -158,7 +278,7 @@ function setupPicker() {
   $('picker-all').addEventListener('click', () => { pickerBoxes(true).forEach(b => { b.checked = true; }); updatePickerCount(); });
   $('picker-none').addEventListener('click', () => { pickerBoxes(true).forEach(b => { b.checked = false; }); updatePickerCount(); });
   $('picker-apply').addEventListener('click', () => {
-    const chosen = pickerBoxes().filter(b => b.checked).map(b => state.playlists[Number(b.value)]);
+    const chosen = chosenPlaylists();
     if (chosen.length) applyPlaylists(chosen);
   });
 }
@@ -188,48 +308,133 @@ function setupImport() {
 
 // ---------- Suche ----------
 
+function notifyDone(text) {
+  if (document.hidden) {
+    document.title = `✓ Fertig – ${APP_TITLE}`;
+    if ($('notify').checked && 'Notification' in window && Notification.permission === 'granted') {
+      try { new Notification('Songsaver: Suche fertig', { body: text }); } catch { /* manche Browser nur per Service Worker */ }
+    }
+  } else {
+    document.title = APP_TITLE;
+  }
+}
+
 async function runSearch() {
+  if (state.running) {
+    state.running.abort();
+    return;
+  }
+  const pending = pendingTracks();
+  if (!pending.length) return;
+
+  if ($('notify').checked && 'Notification' in window && Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+
+  const controller = new AbortController();
+  state.running = controller;
   const button = $('start');
-  button.disabled = true;
+  button.textContent = 'Pause';
+  button.classList.add('secondary');
+  $('country').disabled = true;
   showError('search-error', null);
-  $('results').hidden = true;
   $('progress').hidden = false;
   const fill = $('progress-fill');
   const text = $('progress-text');
-  fill.style.width = '0%';
-  text.textContent = 'Starte Suche …';
 
-  state.country = $('country').value;
-  try { localStorage.setItem(COUNTRY_KEY, state.country); } catch { /* nur Komfort */ }
+  const client = newClient({ onWait: (ms, reason) => { text.textContent = `${reason} (${duration(ms)}) …`; } });
+  const expected = await estimateRequests(pending, client);
+  const startedAt = Date.now();
+  let lastLine = 'Starte Suche …';
+  let etaMs = expected * MIN_INTERVAL_MS;
+  let etaAt = Date.now();
 
-  const client = new ItunesClient({
-    country: state.country,
-    onWait: (ms, reason) => { text.textContent = `${reason} (ca. ${Math.round(ms / 1000)} s) …`; },
-  });
+  const showProgress = () => {
+    const left = Math.max(0, etaMs - (Date.now() - etaAt));
+    text.textContent = left > 1000 ? `${lastLine} · noch ${duration(left)}` : lastLine;
+  };
+  const ticker = setInterval(showProgress, 1000);
+  showProgress();
 
   try {
-    state.results = await matchPlaylist(state.tracks, client, (done, total, track) => {
-      fill.style.width = `${Math.round((done / total) * 100)}%`;
-      text.textContent = `${done} von ${total}: ${track.artists[0] ?? ''} – ${track.name}`;
+    await matchPlaylist(pending, client, {
+      signal: controller.signal,
+      onResult: (result, done, total) => {
+        state.results.set(result.track.id, result);
+        saveResults();
+        const pct = Math.round((done / total) * 100);
+        fill.style.width = `${pct}%`;
+        document.title = `(${pct} %) ${APP_TITLE}`;
+        lastLine = `${done} von ${total}: ${result.track.artists[0] ?? ''} – ${result.track.name}`;
+        // Restzeit aus dem tatsächlichen Tempo (inkl. Wartezeiten) hochrechnen.
+        const perRequest = Math.max(MIN_INTERVAL_MS, (Date.now() - startedAt) / Math.max(1, client.requestCount));
+        etaMs = Math.max(0, expected - client.requestCount) * perRequest;
+        etaAt = Date.now();
+        showProgress();
+        renderResults();
+      },
     });
-    const found = state.results.filter(r => r.match).length;
-    text.textContent = `Fertig: ${found} von ${state.results.length} Titeln im iTunes Store gefunden.`;
-    renderResults();
+    const found = pending.filter(t => state.results.get(t.id)?.match).length;
+    lastLine = `Fertig: ${found} von ${pending.length} Titeln im iTunes Store gefunden.`;
+    notifyDone(lastLine);
   } catch (err) {
-    showError('search-error', err.message);
+    if (err?.name === 'AbortError') {
+      lastLine = `Pausiert – ${pending.length - pendingTracks(pending).length} von ${pending.length} Titeln gesucht. „Weitersuchen“ macht dort weiter.`;
+      document.title = APP_TITLE;
+    } else {
+      showError('search-error', err.message);
+      lastLine = 'Suche abgebrochen.';
+      document.title = APP_TITLE;
+    }
   } finally {
-    button.disabled = false;
+    clearInterval(ticker);
+    etaMs = 0;
+    showProgress();
+    state.running = null;
+    button.classList.remove('secondary');
+    $('country').disabled = false;
+    await saveResults(true);
+    renderResults();
+    updateEstimate();
   }
+}
+
+function setupSearch() {
+  $('start').addEventListener('click', runSearch);
+  $('country').addEventListener('change', () => {
+    state.country = $('country').value;
+    local(COUNTRY_KEY, state.country);
+    // Preise gelten pro Land – bisherige Ergebnisse passen nicht mehr.
+    state.results.clear();
+    saveResults(true);
+    $('progress').hidden = true;
+    renderResults();
+    updateEstimate();
+  });
+  $('notify').addEventListener('change', async e => {
+    local(NOTIFY_KEY, e.target.checked ? '1' : '0');
+    if (e.target.checked && 'Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !state.running) document.title = APP_TITLE;
+  });
 }
 
 // ---------- Ergebnisse ----------
 
 function renderResults() {
-  const plan = buildPurchasePlan(state.results, state.owned);
+  const results = state.tracks.map(t => state.results.get(t.id)).filter(Boolean);
+  $('tracks').hidden = !state.tracks.length;
+  $('purchase').hidden = !results.length;
+  const plan = buildPurchasePlan(results, state.owned);
+  renderTrackRows(plan);
+  if (!results.length) return;
+
+  $('purchase-note').hidden = pendingTracks().length === 0;
   renderStats(plan);
   renderPurchaseList(plan);
-  renderTrackRows(plan);
-  $('results').hidden = false;
 }
 
 function stat(label, value, highlight) {
@@ -239,13 +444,14 @@ function stat(label, value, highlight) {
 }
 
 function renderStats(plan) {
-  const open = state.results.filter(r => !state.owned.has(r.track.id));
-  const found = open.filter(r => r.match).length;
+  const searched = state.tracks.filter(t => !state.owned.has(t.id) && state.results.has(t.id));
+  const found = searched.filter(t => state.results.get(t.id).match).length;
+  const open = pendingTracks().length;
   const saving = plan.singlesTotal - plan.total;
   $('stats').replaceChildren(
     stat('Gesamtpreis', money(plan.total, plan.currency)),
     stat('Ersparnis durch Alben', money(saving > 0.004 ? saving : 0, plan.currency), saving > 0.004),
-    stat('Gefunden', `${found} / ${open.length}`),
+    stat(open ? `Gefunden (${open} noch offen)` : 'Gefunden', `${found} / ${searched.length}`),
   );
 }
 
@@ -288,8 +494,8 @@ function renderTrackRows(plan) {
     if (item.type === 'album') for (const id of item.covers) inAlbum.set(id, item);
   }
 
-  const rows = state.results.map(r => {
-    const t = r.track;
+  const rows = state.tracks.map(t => {
+    const r = state.results.get(t.id);
     const owned = state.owned.has(t.id);
     const term = `${t.artists[0] ?? ''} ${t.name}`;
 
@@ -301,28 +507,31 @@ function renderTrackRows(plan) {
         if (e.target.checked) state.owned.add(t.id); else state.owned.delete(t.id);
         saveOwned();
         renderResults();
+        updateEstimate();
       },
     });
 
     let found;
     let price;
-    if (r.match) {
+    if (r?.match) {
       const [cls, label] = CONFIDENCE_TAG[r.confidence];
       found = el('td', {},
         link(withStoreParam(r.match.trackViewUrl), r.match.trackName),
         ' ', el('span', { class: `tag ${cls}`, title: `Übereinstimmung ${Math.round(r.score * 100)} %` }, label),
         el('span', { class: 'sub' }, `${r.match.artistName} · ${r.match.collectionName}`));
-      const album = inAlbum.get(t.id);
       price = el('td', { class: 'col-num' },
         r.match.trackPrice > 0 ? money(r.match.trackPrice, r.match.currency) : 'nur Album',
-        album && !owned ? el('span', { class: 'sub' }, 'im Album') : null);
-    } else {
+        inAlbum.has(t.id) && !owned ? el('span', { class: 'sub' }, 'im Album') : null);
+    } else if (r) {
       found = el('td', {},
         el('span', { class: 'tag bad' }, 'nicht gefunden'),
         r.candidate
           ? el('span', { class: 'sub' }, 'Ähnlichster Treffer: ', link(withStoreParam(r.candidate.trackViewUrl), `${r.candidate.artistName} – ${r.candidate.trackName}`))
           : null);
       price = el('td', { class: 'col-num' }, '–');
+    } else {
+      found = el('td', {}, el('span', { class: 'sub' }, owned ? '–' : 'noch nicht gesucht'));
+      price = el('td', { class: 'col-num' }, '');
     }
 
     return el('tr', { class: owned ? 'owned' : null },
@@ -337,13 +546,16 @@ function renderTrackRows(plan) {
 
 // ---------- Start ----------
 
-function init() {
-  try {
-    const saved = localStorage.getItem(COUNTRY_KEY);
-    if (saved && AMAZON_DOMAIN[saved]) $('country').value = saved;
-  } catch { /* egal */ }
+async function init() {
+  const savedCountry = local(COUNTRY_KEY);
+  if (savedCountry && AMAZON_DOMAIN[savedCountry]) $('country').value = savedCountry;
+  state.country = $('country').value;
+  $('notify').checked = local(NOTIFY_KEY) === '1';
+
   setupImport();
-  $('start').addEventListener('click', runSearch);
+  setupSearch();
+  state.store = await openStore();
+  await restoreSession();
 }
 
 init();
