@@ -26,6 +26,9 @@ export function scoreSong(track, cand) {
   const b = versionMarkers(cand.trackName).join(' ');
   const versionPenalty = a === b ? 0 : 0.3;
 
+  // Ein klar anderer Künstler ist eine Coverversion, kein Treffer – egal wie gut der Titel passt.
+  if (artist < 0.5) return Math.min(0.4, 0.45 * title + 0.25 * artist);
+
   const score = 0.45 * title + 0.25 * artist + 0.2 * duration + 0.1 * album - versionPenalty;
   return Math.max(0, Math.min(1, score));
 }

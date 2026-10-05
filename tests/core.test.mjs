@@ -112,3 +112,28 @@ test('Ablauf: Album-Titel werden mit zwei Anfragen statt einzeln gefunden', asyn
   assert.deepEqual(calls.map(c => c[0]), ['album', 'lookup']);
   assert.ok(results.every(r => r.match && r.via === 'album'));
 });
+
+test('Exportify (aktuelles Format): Künstler mit ";" getrennt, Kommas gehören zum Namen', () => {
+  const csv = [
+    '"Track URI","ISRC","Track Name","Album Name","Artist Name(s)","Release Date","Duration (ms)"',
+    '"spotify:track:1","USX1","My Darlin\'","Das Ist Daddy","Marlon Hoffstadt;Rose Gray","2024-01-01","180000"',
+    '"spotify:track:2","USX2","September","The Best Of","Earth, Wind & Fire","1978-01-01","215000"',
+  ].join('\n');
+  const [a, b] = parsePlaylistCsv(csv);
+  assert.deepEqual(a.artists, ['Marlon Hoffstadt', 'Rose Gray']);
+  assert.deepEqual(b.artists, ['Earth, Wind & Fire']);
+  assert.equal(a.durationMs, 180000);
+  assert.equal(a.isrc, 'USX1');
+  assert.deepEqual(b.albumArtists, ['Earth, Wind & Fire']);
+});
+
+test('Matching: gleicher Titel von anderem Künstler ist kein Treffer', () => {
+  const t = { name: "For What It's Worth", artists: ['The Lone Bellow'], album: "For What It's Worth", durationMs: 200_000 };
+  assert.ok(scoreSong(t, cand({ trackName: "For What It's Worth", artistName: 'Haley Reinhart', collectionName: "What's That Sound?", trackTimeMillis: 200_000 })) < ACCEPT_SONG);
+});
+
+test('Titel: „Original Mix“ ist die normale Fassung', () => {
+  assert.equal(normalizeTitle('Long Life - Original Mix'), 'long life');
+  assert.deepEqual(versionMarkers('Long Life (Original Mix)'), []);
+  assert.deepEqual(versionMarkers('Long Life - Extended Mix'), ['mix']);
+});

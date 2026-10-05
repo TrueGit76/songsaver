@@ -1,4 +1,6 @@
-// CSV-Import für Playlist-Exporte im Exportify-Format (englische und deutsche Spaltennamen).
+// CSV-Import für Playlist-Exporte von Exportify (englische und deutsche Spaltennamen).
+// Zwei Formate sind im Umlauf: das ältere mit "Artist URI(s)" (Künstler durch ", " getrennt, Kommas als "\,")
+// und das aktuelle von exportify.net (Künstler durch ";" getrennt, Kommas gehören zum Namen).
 
 /** Zerlegt CSV-Text (RFC 4180: Anführungszeichen, "" als Escape, CRLF/LF) in Zeilen. */
 export function parseCsv(text) {
@@ -38,22 +40,27 @@ export function parseCsv(text) {
 const COLUMNS = {
   uri: ['Track URI', 'Track-URI'],
   name: ['Track Name', 'Track-Name'],
+  artistUris: ['Artist URI(s)', 'Künstler-URI(s)'],
   artists: ['Artist Name(s)', 'Künstlername(n)'],
   albumUri: ['Album URI', 'Album-URI'],
   album: ['Album Name', 'Album-Name'],
   albumArtists: ['Album Artist Name(s)', 'Album-Künstlername(n)'],
-  releaseDate: ['Album Release Date', 'Veröffentlichungsdatum des Albums'],
+  releaseDate: ['Album Release Date', 'Veröffentlichungsdatum des Albums', 'Release Date'],
   imageUrl: ['Album Image URL', 'Album-Bild-URL'],
   discNumber: ['Disc Number', 'Disc-Nummer'],
   trackNumber: ['Track Number', 'Track-Nummer'],
-  durationMs: ['Track Duration (ms)', 'Track-Dauer (ms)'],
+  durationMs: ['Track Duration (ms)', 'Track-Dauer (ms)', 'Duration (ms)'],
   isrc: ['ISRC'],
 };
 
-/** Exportify trennt mehrere Künstler mit ", " und maskiert Kommas im Namen als "\,". */
-export function splitArtists(value) {
+/**
+ * Zerlegt das Künstlerfeld. Älteres Format: ", " als Trenner, Kommas im Namen als "\,".
+ * Aktuelles Format: ";" als Trenner, "Earth, Wind & Fire" bleibt ein Name.
+ */
+export function splitArtists(value, separator = ', ') {
   if (!value) return [];
-  return value.split(/(?<!\\), /).map(a => a.replace(/\\,/g, ',').trim()).filter(Boolean);
+  const parts = separator === ';' ? value.split(';') : value.split(/(?<!\\), /).map(a => a.replace(/\\,/g, ','));
+  return parts.map(a => a.trim()).filter(Boolean);
 }
 
 /**
@@ -73,14 +80,15 @@ export function parsePlaylistCsv(text) {
     throw new Error('Unbekanntes Format: Die Spalten „Track Name“ und „Artist Name(s)“ wurden nicht gefunden. Bitte eine CSV-Datei von Exportify verwenden.');
   }
 
+  const separator = index.artistUris >= 0 ? ', ' : ';';
   const get = (row, key) => (index[key] >= 0 ? (row[index[key]] ?? '').trim() : '');
   const toInt = v => (v === '' || isNaN(Number(v)) ? null : Number(v));
 
   return rows.slice(1)
     .filter(row => get(row, 'name'))
     .map(row => {
-      const artists = splitArtists(get(row, 'artists'));
-      const albumArtists = splitArtists(get(row, 'albumArtists'));
+      const artists = splitArtists(get(row, 'artists'), separator);
+      const albumArtists = splitArtists(get(row, 'albumArtists'), separator);
       const album = get(row, 'album');
       return {
         // Ohne Spotify-URI eine stabile Ersatz-ID, damit derselbe Song in mehreren Dateien gleich erkannt wird.

@@ -7,6 +7,9 @@ const NOISE_PATTERNS = [
   /\s*-\s*(\d{4}\s+)?(digital(ly)?\s+)?remaster(ed)?(\s+\d{4})?(\s+version)?\s*$/gi,
   /\s*[([](\d{4}\s+)?(digital(ly)?\s+)?remaster(ed)?(\s+\d{4})?(\s+version)?[)\]]/gi,
   /\s*-\s*(single|album)\s+version\s*$/gi,
+  // „Original Mix“ ist in der elektronischen Musik die normale Fassung.
+  /\s*-\s*original\s+mix\s*$/gi,
+  /\s*[([]original\s+mix[)\]]/gi,
   /\s*[([](single|album)\s+version[)\]]/gi,
   /\s*[([](\d+(th|st|nd|rd)\s+anniversary\s+)?(deluxe|expanded|special)(\s+edition|\s+version)?[)\]]/gi,
 ];
