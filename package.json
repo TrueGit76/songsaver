@@ -1,0 +1,15 @@
+{
+  "name": "songsaver",
+  "private": true,
+  "type": "module",
+  "description": "Findet heraus, wo die Songs einer Playlist zu kaufen sind und was sie kosten.",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node --test tests/",
+    "check:live": "node tools/live-check.mjs",
+    "check:ui": "node tools/ui-check.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

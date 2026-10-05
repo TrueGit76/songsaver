@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Songsaver – Playlist kaufen statt streamen</title>
+  <meta name="description" content="Finde heraus, wo du die Songs deiner Spotify-Playlist kaufen kannst und was sie kosten.">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1>Songsaver</h1>
+      <p class="tagline">Deine Playlist zum Behalten: Wo gibt es die Songs zu kaufen – und was kostet das?</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card" id="import">
+      <h2>1. Playlists hochladen</h2>
+      <ol class="steps">
+        <li>
+          <a href="https://exportify.net" target="_blank" rel="noopener">exportify.net</a> öffnen,
+          auf <strong>„Get Started“</strong> bzw. <strong>„Loslegen“</strong> klicken und bei Spotify anmelden.
+          <span class="sub">Exportify ist ein unabhängiges, kostenloses Werkzeug. Dein Spotify-Passwort gibst du nur bei Spotify ein.</span>
+        </li>
+        <li>
+          Neben einer Playlist auf <strong>„Export“</strong> bzw. <strong>„Exportieren“</strong> klicken – oder oben auf
+          <strong>„Export All“</strong> bzw. <strong>„Alles exportieren“</strong>, um alle Playlists auf einmal als ZIP-Datei zu laden.
+        </li>
+        <li>Die heruntergeladene <strong>.csv</strong>- oder <strong>.zip</strong>-Datei hier hochladen. Sie bleibt in deinem Browser.</li>
+      </ol>
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="file" accept=".csv,.zip,text/csv,application/zip" multiple>
+        <span class="dropzone-text"><strong>Dateien auswählen</strong> oder hierher ziehen<span class="sub">CSV oder ZIP von Exportify, auch mehrere</span></span>
+      </label>
+      <div class="row">
+        <button type="button" class="link-button" id="sample">Beispiel-Playlist verwenden</button>
+      </div>
+      <p class="error" id="import-error" hidden></p>
+
+      <div class="picker" id="picker" hidden>
+        <h3 id="picker-title"></h3>
+        <div class="row picker-tools">
+          <input type="search" id="picker-filter" placeholder="Playlists filtern …" aria-label="Playlists filtern">
+          <button type="button" class="link-button" id="picker-all">Alle</button>
+          <button type="button" class="link-button" id="picker-none">Keine</button>
+        </div>
+        <ul class="picker-list" id="picker-list"></ul>
+        <div class="row">
+          <button type="button" class="primary" id="picker-apply">Auswahl übernehmen</button>
+          <span class="hint picker-count" id="picker-count"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="search" hidden>
+      <h2>2. Preise suchen</h2>
+      <p id="playlist-summary"></p>
+      <div class="row">
+        <label class="field">
+          <span>Store-Land</span>
+          <select id="country">
+            <option value="de">Deutschland</option>
+            <option value="at">Österreich</option>
+            <option value="ch">Schweiz</option>
+            <option value="gb">Großbritannien</option>
+            <option value="us">USA</option>
+          </select>
+        </label>
+        <button type="button" class="primary" id="start">Preise suchen</button>
+      </div>
+      <div class="progress" id="progress" hidden>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <p class="progress-text" id="progress-text" aria-live="polite"></p>
+      </div>
+      <p class="error" id="search-error" hidden></p>
+    </section>
+
+    <section id="results" hidden>
+      <div class="card">
+        <h2>3. Einkaufsliste</h2>
+        <div class="stats" id="stats"></div>
+        <ul class="purchase-list" id="purchase-list"></ul>
+      </div>
+
+      <div class="card">
+        <h2>Alle Titel</h2>
+        <p class="hint">Hake Titel ab, die du schon besitzt – sie werden dann nicht mehr eingerechnet.</p>
+        <div class="table-scroll">
+          <table class="tracks">
+            <thead>
+              <tr>
+                <th scope="col" class="col-owned">Habe ich</th>
+                <th scope="col">Titel aus der Playlist</th>
+                <th scope="col">Gefunden bei iTunes</th>
+                <th scope="col" class="col-num">Preis</th>
+                <th scope="col">Andere Shops</th>
+              </tr>
+            </thead>
+            <tbody id="track-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap site-footer">
+    Preise: Apple iTunes Store, live abgefragt – ohne Gewähr. Gekaufte iTunes-Titel sind DRM-freie AAC-Dateien (256 kbit/s).
+    Bandcamp, Amazon und Qobuz sind vorerst nur verlinkt.
+  </footer>
+</body>
+</html>
