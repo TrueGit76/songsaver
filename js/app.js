@@ -25,7 +25,7 @@ const state = {
   summary: '',
   playlists: [],       // Kandidaten in der Playlist-Auswahl
   results: new Map(),  // Track-ID -> Suchergebnis (für state.country)
-  artistSites: new Map(), // Künstlername (klein) -> Website-URL oder null (nicht gefunden)
+  artistSites: new Map(), // Künstlername (klein) -> { website, bandcamp } (Felder null, wenn nicht gefunden)
   country: 'de',
   subPrice: null,      // eigener Abo-Preis; null = Richtwert für das Store-Land
   cacheDays: 7,        // 0 = unbegrenzt
@@ -118,7 +118,7 @@ function plainAlbumTitle(title) {
 }
 
 /** Suchlinks für das Album in weiteren Shops, getrennt nach CD/Vinyl und Download. Es sind Suchen, keine Treffer. */
-function albumShops(artist, title) {
+function albumShops(artist, title, bandcampUrl = null) {
   const term = `${artist} ${plainAlbumTitle(title)}`.trim();
   const q = encodeURIComponent(term);
   const de = DE_SHOPS.includes(state.country);
@@ -132,7 +132,8 @@ function albumShops(artist, title) {
     ['Discogs', `https://www.discogs.com/search/?q=${q}&type=release`],
   ].filter(Boolean);
   const digital = [
-    ['Bandcamp', `https://bandcamp.com/search?q=${q}&item_type=a`],
+    // Direkter Link zur Künstlerseite (aus MusicBrainz), sonst Suche nach dem Album.
+    bandcampUrl ? ['Bandcamp (Künstlerseite)', bandcampUrl] : ['Bandcamp', `https://bandcamp.com/search?q=${q}&item_type=a`],
     ['Qobuz', `https://www.qobuz.com/${QOBUZ_LOCALE[state.country]}/search?q=${q}`],
   ];
   const group = (label, shops) => el('div', { class: 'shop-group' },
@@ -570,7 +571,7 @@ function renderAlbums(plan) {
   $('album-list').replaceChildren(...albums.map(item => {
     const tag = el('span', { class: 'tag good' }, `spart ${money(item.singlesSum - item.price, plan.currency)} gegenüber Einzelkauf`);
     const artist = albumArtist(item);
-    const site = artist ? state.artistSites.get(artist.toLowerCase()) : null;
+    const site = artist ? state.artistSites.get(artist.toLowerCase())?.website : null;
     return el('li', { class: 'album' },
       el('img', { src: item.artwork ?? '', alt: '', loading: 'lazy' }),
       el('div', {},
@@ -578,7 +579,7 @@ function renderAlbums(plan) {
         el('div', { class: 'album-meta' }, item.artist, site ? [' · ', link(site, 'Website')] : null),
         el('div', { class: 'album-meta' },
           `${item.distinct} von ${item.trackCount} Titeln aus deiner Auswahl · zusammen ${plays(item)}× gehört `, tag),
-        albumShops(item.artist, item.title)),
+        albumShops(item.artist, item.title, artist ? state.artistSites.get(artist.toLowerCase())?.bandcamp : null)),
       el('div', { class: 'album-side' },
         el('span', { class: 'price' }, money(item.price, plan.currency)),
         link(item.url, 'Album bei iTunes', 'buy')));

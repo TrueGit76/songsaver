@@ -1,10 +1,10 @@
-// Offizielle Künstler-Website über MusicBrainz (frei nutzbar, CORS offen, ~1 Anfrage/Sekunde).
+// Offizielle Künstler-Website und Bandcamp-Seite über MusicBrainz (frei nutzbar, CORS offen, ~1 Anfrage/Sekunde).
 // Zwei Schritte: Künstler per Name suchen, dann dessen Links ("official homepage") lesen.
 
 const BASE = 'https://musicbrainz.org/ws/2';
 export const MIN_INTERVAL_MS = 1100;
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const CACHE_PREFIX = 'artist-site:';
+const CACHE_PREFIX = 'artist-links:'; // früher 'artist-site:' (nur Website) – bewusst neuer Schlüssel
 
 const VARIOUS = /^(various artists?|verschiedene( interpreten| künstler)?|diverse|sampler|v\.?\s?a\.?)$/i;
 
@@ -38,6 +38,18 @@ export function pickHomepage(relations) {
   return null;
 }
 
+/** Bandcamp-Seite des Künstlers (bandcamp.com oder Unterseite), nicht als beendet markiert. */
+export function pickBandcamp(relations) {
+  for (const r of relations ?? []) {
+    if (r.type !== 'bandcamp' || r.ended) continue;
+    try {
+      const u = new URL(r.url?.resource ?? '');
+      if (u.protocol === 'https:' && (u.hostname === 'bandcamp.com' || u.hostname.endsWith('.bandcamp.com'))) return u.href;
+    } catch { /* ungültige URL überspringen */ }
+  }
+  return null;
+}
+
 export class ArtistSiteClient {
   /**
    * @param {object} opts
@@ -61,24 +73,27 @@ export class ArtistSiteClient {
     return res.json();
   }
 
-  /** @returns {Promise<string|null>} URL der Künstler-Website oder null (auch bei Fehlern, ohne zu speichern) */
+  /** @returns {Promise<{website: string|null, bandcamp: string|null}>} bei Fehlern leer, ohne zu speichern */
   async find(name) {
     const key = CACHE_PREFIX + name.trim().toLowerCase();
     try {
       const hit = await this.store?.get('cache', key);
-      if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.url;
+      if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.links;
     } catch { /* Cache ist nur Komfort */ }
 
-    let url;
+    const none = { website: null, bandcamp: null };
+    let links;
     try {
       const quoted = name.replace(/(["\\])/g, '\\$1');
       const search = await this.get(`artist?query=${encodeURIComponent(`artist:"${quoted}"`)}&limit=5`);
       const id = pickArtist(search.artists, name);
-      url = id ? pickHomepage((await this.get(`artist/${id}?inc=url-rels`)).relations) : null;
+      const relations = id ? (await this.get(`artist/${id}?inc=url-rels`)).relations : [];
+      links = { website: pickHomepage(relations), bandcamp: pickBandcamp(relations) };
     } catch {
-      return null; // Netzwerk/Limit: später nochmal versuchen
+      return none; // Netzwerk/Limit: später nochmal versuchen
     }
-    try { await this.store?.set('cache', key, { url, at: Date.now() }); } catch { /* s. o. */ }
-    return url;
+    try { await this.store?.set('cache', key, { links, at: Date.now() }); } catch { /* s. o. */ }
+    return links;
   }
+
 }

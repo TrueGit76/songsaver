@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSingleArtist, pickArtist, pickHomepage, ArtistSiteClient } from '../js/artistsite.js';
+import { isSingleArtist, pickArtist, pickHomepage, pickBandcamp, ArtistSiteClient } from '../js/artistsite.js';
 import { memoryStore } from '../js/store.js';
 
 test('Sampler zählen nicht als Einzelkünstler', () => {
@@ -27,12 +27,22 @@ test('Homepage: nur "official homepage", nicht beendet, http(s)', () => {
   assert.equal(pickHomepage([]), null);
 });
 
+test('Bandcamp: nur https-Seiten auf bandcamp.com, nicht beendet', () => {
+  const rel = (type, resource, ended = false) => ({ type, ended, url: { resource } });
+  assert.equal(pickBandcamp([rel('bandcamp', 'https://band.bandcamp.com'), rel('bandcamp', 'https://zweite.bandcamp.com')]), 'https://band.bandcamp.com/');
+  assert.equal(pickBandcamp([rel('bandcamp', 'https://alt.bandcamp.com', true), rel('bandcamp', 'https://neu.bandcamp.com/')]), 'https://neu.bandcamp.com/');
+  assert.equal(pickBandcamp([rel('bandcamp', 'http://band.bandcamp.com')]), null, 'kein https');
+  assert.equal(pickBandcamp([rel('bandcamp', 'https://bandcamp.com.evil.example/x')]), null, 'fremde Domain');
+  assert.equal(pickBandcamp([rel('official homepage', 'https://band.bandcamp.com')]), null, 'falscher Typ');
+  assert.equal(pickBandcamp([]), null);
+});
+
 function fakeFetch(calls) {
   return async url => {
     calls.push(url);
     const body = url.includes('/artist?')
       ? { artists: [{ id: 'abc', name: 'Radiohead', score: 100 }] }
-      : { relations: [{ type: 'official homepage', url: { resource: 'https://radiohead.com/' } }] };
+      : { relations: [{ type: 'official homepage', url: { resource: 'https://radiohead.com/' } }, { type: 'bandcamp', url: { resource: 'https://radiohead.bandcamp.com/' } }] };
     return { ok: true, json: async () => body };
   };
 }
@@ -41,12 +51,12 @@ test('Client: zwei Anfragen, danach aus dem Cache; Fehler werden nicht gemerkt',
   const calls = [];
   const store = memoryStore();
   const client = new ArtistSiteClient({ store, fetch: fakeFetch(calls), sleep: async () => {} });
-  assert.equal(await client.find('Radiohead'), 'https://radiohead.com/');
+  assert.deepEqual(await client.find('Radiohead'), { website: 'https://radiohead.com/', bandcamp: 'https://radiohead.bandcamp.com/' });
   assert.equal(calls.length, 2);
-  assert.equal(await client.find('radiohead'), 'https://radiohead.com/');
+  assert.deepEqual(await client.find('radiohead'), { website: 'https://radiohead.com/', bandcamp: 'https://radiohead.bandcamp.com/' });
   assert.equal(calls.length, 2, 'zweiter Aufruf ohne Anfrage');
 
   const failing = new ArtistSiteClient({ store: memoryStore(), fetch: async () => ({ ok: false, status: 503 }), sleep: async () => {} });
-  assert.equal(await failing.find('Radiohead'), null);
-  assert.equal(await failing.store.get('cache', 'artist-site:radiohead'), undefined);
+  assert.deepEqual(await failing.find('Radiohead'), { website: null, bandcamp: null });
+  assert.equal(await failing.store.get('cache', 'artist-links:radiohead'), undefined);
 });
