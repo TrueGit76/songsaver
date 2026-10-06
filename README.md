@@ -28,5 +28,6 @@ npm run check:ui        # App im Headless-Browser durchklicken, Screenshots in s
 - `js/zip.js`, `js/playlists.js` – Exportify-ZIP lesen, Playlists zusammenführen
 - `js/matcher.js` – Titel finden (Album-Titel gebündelt über eine Album-Abfrage), Anfragen schätzen, günstigsten Einkauf berechnen
 - `js/plays.js` – Hörzahlen pro Titel (Dummy) und Filter „mindestens x-mal gehört“
+- `js/artistsite.js` – offizielle Künstler-Website über MusicBrainz (nur Alben mit einem Künstler, 30 Tage Cache)
 - `js/app.js` – Oberfläche
 - `samples/beispiel-playlist.csv` – 5 Einzeltitel + komplettes Album „Thriller“ (Metadaten und ISRCs von Deezer, Spotify-URIs sind Platzhalter)

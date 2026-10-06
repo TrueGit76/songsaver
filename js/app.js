@@ -2,6 +2,7 @@ import { loadPlaylistFiles, mergePlaylists } from './playlists.js';
 import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
 import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam } from './matcher.js';
 import { openStore, memoryStore } from './store.js';
+import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
 import { playCount, filterByPlays, DUMMY_PLAYS } from './plays.js';
 
 const OWNED_KEY = 'songsaver:owned';
@@ -23,6 +24,7 @@ const state = {
   summary: '',
   playlists: [],       // Kandidaten in der Playlist-Auswahl
   results: new Map(),  // Track-ID -> Suchergebnis (für state.country)
+  artistSites: new Map(), // Künstlername (klein) -> Website-URL oder null (nicht gefunden)
   country: 'de',
   subPrice: null,      // eigener Abo-Preis; null = Richtwert für das Store-Land
   minPlays: 1,         // nur Titel mit mindestens so vielen Wiedergaben beachten
@@ -476,6 +478,43 @@ function renderResults() {
 
   $('purchase-note').hidden = pendingTracks().length === 0;
   renderStats(plan);
+  queueArtistSites(plan);
+}
+
+// ---------- Künstler-Websites (nur für Alben mit einem Künstler) ----------
+
+const artistQueue = [];
+let artistWorker = false;
+
+/** Albumkünstler eines Album-Postens, falls es ein einzelner Künstler ist (kein Sampler). */
+function albumArtist(item) {
+  const track = state.tracks.find(t => t.id === item.covers[0]);
+  const name = track?.albumArtists?.[0];
+  return item.type === 'album' && track?.albumArtists?.length === 1 && isSingleArtist(name) ? name : null;
+}
+
+function queueArtistSites(plan) {
+  for (const item of plan.items) {
+    const name = albumArtist(item);
+    const key = name?.toLowerCase();
+    if (!name || state.artistSites.has(key) || artistQueue.some(n => n.toLowerCase() === key)) continue;
+    artistQueue.push(name);
+  }
+  if (artistQueue.length && !artistWorker) runArtistWorker();
+}
+
+async function runArtistWorker() {
+  artistWorker = true;
+  const client = new ArtistSiteClient({ store: state.store });
+  try {
+    while (artistQueue.length) {
+      const name = artistQueue.shift();
+      state.artistSites.set(name.toLowerCase(), await client.find(name));
+      renderResults();
+    }
+  } finally {
+    artistWorker = false;
+  }
 }
 
 function stat(label, value, highlight) {
@@ -569,10 +608,13 @@ function buyColumn(t, r, item, currency, shownAlbums) {
   if (item.reason === 'cheaper') tag = el('span', { class: 'tag good' }, `spart ${money(item.singlesSum - item.price, currency)}`);
   else if (item.reason === 'same') tag = el('span', { class: 'tag good' }, 'gleicher Preis, mehr Musik');
   else tag = el('span', { class: 'tag info' }, 'nur als Album erhältlich');
+  const artist = albumArtist(item);
+  const site = artist ? state.artistSites.get(artist.toLowerCase()) : null;
   return cell(
     el('span', { class: 'price' }, money(item.price, currency)),
     link(item.url, 'Album bei iTunes', 'buy'),
-    el('span', { class: 'sub' }, `Album „${item.title}“ · ${item.trackCount} Titel, ${item.covers.length} aus deiner Playlist `, tag));
+    el('span', { class: 'sub' }, `Album „${item.title}“ · ${item.trackCount} Titel, ${item.covers.length} aus deiner Playlist `, tag),
+    site ? el('span', { class: 'sub' }, link(site, `Website von ${artist}`)) : null);
 }
 
 function trackRow(t, buyCell) {
