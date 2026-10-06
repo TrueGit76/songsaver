@@ -31,3 +31,7 @@ npm run check:ui        # App im Headless-Browser durchklicken, Screenshots in s
 - `js/artistsite.js` – offizielle Künstler-Website über MusicBrainz (nur Alben mit einem Künstler, 30 Tage Cache)
 - `js/app.js` – Oberfläche
 - `samples/beispiel-playlist.csv` – 5 Einzeltitel + komplettes Album „Thriller“ (Metadaten und ISRCs von Deezer, Spotify-URIs sind Platzhalter)
+
+## Lizenz
+
+[MIT](LICENSE). Preise und Katalogdaten stammen von Apple (iTunes Search API) und MusicBrainz; für diese Daten gelten deren eigene Bedingungen.
