@@ -3,6 +3,20 @@
 const BASE = 'https://itunes.apple.com';
 export const MIN_INTERVAL_MS = 3100;
 const RETRY_WAIT_MS = 60_000;
+const MAX_ATTEMPTS = 3;
+
+// Takt und Sperre gelten für alle Clients und Tabs sowie über Pause und Neuladen hinweg;
+// sonst könnte „Weitersuchen“ oder ein Neuladen sofort wieder am Limit kratzen.
+const LAST_KEY = 'songsaver:itunes:last';
+const BLOCKED_KEY = 'songsaver:itunes:blockedUntil';
+
+function sharedTime(key) {
+  try { return Number(globalThis.localStorage?.getItem(key)) || 0; } catch { return 0; }
+}
+
+function setSharedTime(key, value) {
+  try { globalThis.localStorage?.setItem(key, String(value)); } catch { /* nur Komfort */ }
+}
 export const DEFAULT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Nur diese Felder werden gebraucht – hält den Cache klein.
@@ -66,26 +80,28 @@ export class ItunesClient {
     if (cached) return cached;
 
     for (let attempt = 0; ; attempt++) {
-      const wait = this.lastRequestAt + this.minIntervalMs - Date.now();
-      if (wait > 0) await this.sleep(wait);
-      this.signal?.throwIfAborted();
-      this.lastRequestAt = Date.now();
-      this.requestCount++;
+      await this.waitForTurn();
 
-      let res;
+      let res = null;
       try {
         res = await this.fetch(url);
       } catch (err) {
-        if (attempt >= 2) throw new Error(`iTunes ist nicht erreichbar (${err.message}).`);
-        await this.sleep(2000);
+        if (globalThis.navigator?.onLine === false) throw new Error('Keine Internetverbindung.');
+        // Bei überschrittenem Limit antwortet Apple oft ohne CORS-Header; der Browser meldet das nur
+        // als Netzwerkfehler. Das behandeln wir wie ein Limit und warten, statt aufzugeben.
+        if (attempt + 1 >= MAX_ATTEMPTS) {
+          throw new Error(`iTunes antwortet nicht (${err.message}) – vermutlich Anfragelimit. Bitte in einigen Minuten mit „Weitersuchen“ fortfahren.`);
+        }
+        await this.backOff(RETRY_WAIT_MS * (attempt + 1), 'iTunes antwortet nicht (vermutlich Anfragelimit) – warte');
         continue;
       }
 
       // Apple antwortet bei überschrittenem Limit mit 403 oder 429.
       if (res.status === 403 || res.status === 429) {
-        if (attempt >= 2) throw new Error('iTunes hat zu viele Anfragen gemeldet. Bitte in ein paar Minuten erneut versuchen.');
-        this.onWait(RETRY_WAIT_MS, 'Anfragelimit von iTunes erreicht – warte kurz');
-        await this.sleep(RETRY_WAIT_MS);
+        if (attempt + 1 >= MAX_ATTEMPTS) throw new Error('iTunes hat zu viele Anfragen gemeldet. Bitte in ein paar Minuten mit „Weitersuchen“ fortfahren.');
+        const retryAfter = Number(res.headers?.get?.('retry-after'));
+        const wait = retryAfter > 0 ? retryAfter * 1000 : RETRY_WAIT_MS * (attempt + 1);
+        await this.backOff(wait, 'Anfragelimit von iTunes erreicht – warte');
         continue;
       }
       if (!res.ok) throw new Error(`iTunes-Anfrage fehlgeschlagen (HTTP ${res.status}).`);
@@ -95,6 +111,28 @@ export class ItunesClient {
       await this.writeCache(url, results);
       return results;
     }
+  }
+
+  /** Wartet auf die nächste erlaubte Anfrage (Mindestabstand und evtl. laufende Sperre) und zählt sie. */
+  async waitForTurn() {
+    const earliest = Math.max(
+      this.lastRequestAt, sharedTime(LAST_KEY),
+    ) + this.minIntervalMs;
+    const blocked = sharedTime(BLOCKED_KEY);
+    if (blocked > Date.now()) this.onWait(blocked - Date.now(), 'Anfragelimit von iTunes – warte');
+    const wait = Math.max(earliest, blocked) - Date.now();
+    if (wait > 0) await this.sleep(wait);
+    this.signal?.throwIfAborted();
+    this.lastRequestAt = Date.now();
+    setSharedTime(LAST_KEY, this.lastRequestAt);
+    this.requestCount++;
+  }
+
+  /** Sperre merken (auch für andere Tabs und nach Neuladen) und abbrechbar warten. */
+  async backOff(ms, reason) {
+    setSharedTime(BLOCKED_KEY, Date.now() + ms);
+    this.onWait(ms, reason);
+    await this.sleep(ms);
   }
 
   async readCache(url) {

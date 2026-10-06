@@ -82,3 +82,47 @@ test('Cache: Gültigkeitsdauer ist einstellbar (unbegrenzt behält auch alte Ein
   await store.clear('cache');
   assert.equal(await store.count('cache'), 0);
 });
+
+const okResponse = { ok: true, status: 200, json: async () => ({ results: [{ trackName: 'x' }] }) };
+
+test('Limit: Abstand zwischen Anfragen wird eingehalten', async () => {
+  const waits = [];
+  const c = new ItunesClient({ country: 'de', fetch: async () => okResponse, sleep: async ms => { waits.push(ms); } });
+  await c.searchSongs('a'); await c.searchSongs('b'); await c.searchSongs('c');
+  assert.equal(waits.length, 2, 'erste Anfrage sofort, die nächsten warten');
+  assert.ok(waits.every(ms => ms > 2500 && ms <= 3100), `Wartezeiten: ${waits}`);
+});
+
+test('Limit: Netzwerkfehler (Apple ohne CORS-Header) wird wie Limit behandelt – warten statt aufgeben', async () => {
+  const waits = [];
+  const hints = [];
+  let calls = 0;
+  const c = new ItunesClient({
+    country: 'de', minIntervalMs: 0,
+    fetch: async () => { if (++calls < 3) throw new TypeError('Failed to fetch'); return okResponse; },
+    sleep: async ms => { waits.push(ms); },
+    onWait: (ms, why) => hints.push(why),
+  });
+  assert.deepEqual(await c.searchSongs('a'), [{ trackName: 'x' }]);
+  assert.deepEqual(waits, [60_000, 120_000]);
+  assert.ok(hints.every(h => h.includes('Anfragelimit')));
+});
+
+test('Limit: dauerhaft keine Antwort -> verständliche Fehlermeldung nach drei Versuchen', async () => {
+  let calls = 0;
+  const c = new ItunesClient({ country: 'de', minIntervalMs: 0, fetch: async () => { calls++; throw new TypeError('Failed to fetch'); }, sleep: async () => {} });
+  await assert.rejects(() => c.searchSongs('a'), /vermutlich Anfragelimit/);
+  assert.equal(calls, 3);
+});
+
+test('Limit: 429 mit Retry-After wartet so lange wie verlangt', async () => {
+  const waits = [];
+  let calls = 0;
+  const c = new ItunesClient({
+    country: 'de', minIntervalMs: 0,
+    fetch: async () => (++calls === 1 ? { ok: false, status: 429, headers: new Headers({ 'retry-after': '5' }) } : okResponse),
+    sleep: async ms => { waits.push(ms); },
+  });
+  await c.searchSongs('a');
+  assert.deepEqual(waits, [5000]);
+});
