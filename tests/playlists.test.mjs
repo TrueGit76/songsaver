@@ -41,3 +41,13 @@ test('Einzelne CSV-Datei', async () => {
 test('Playlist-Name aus Exportify-Dateinamen', () => {
   assert.equal(playlistNameFromFile('ordner/road_trip_2026.csv'), 'Road trip 2026');
 });
+
+test('Zusammenführen: Titel kennt alle seine Playlists', () => {
+  const t = id => ({ id, name: id, artists: ['A'] });
+  const { tracks, duplicates } = mergePlaylists([
+    { name: 'Eins', tracks: [t('x'), t('y')] },
+    { name: 'Zwei', tracks: [t('y'), t('z')] },
+  ]);
+  assert.equal(duplicates, 1);
+  assert.deepEqual(tracks.map(x => [x.id, x.playlists]), [['x', ['Eins']], ['y', ['Eins', 'Zwei']], ['z', ['Zwei']]]);
+});

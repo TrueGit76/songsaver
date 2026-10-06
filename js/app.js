@@ -2,13 +2,18 @@ import { loadPlaylistFiles, mergePlaylists } from './playlists.js';
 import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
 import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam } from './matcher.js';
 import { openStore, memoryStore } from './store.js';
+import { playCount, filterByPlays, DUMMY_PLAYS } from './plays.js';
 
 const OWNED_KEY = 'songsaver:owned';
 const COUNTRY_KEY = 'songsaver:country';
 const NOTIFY_KEY = 'songsaver:notify';
+const MIN_PLAYS_KEY = 'songsaver:minPlays';
+const SUB_PRICE_KEY = 'songsaver:subPrice';
 const APP_TITLE = document.title;
 
 const AMAZON_DOMAIN = { de: 'amazon.de', at: 'amazon.de', ch: 'amazon.de', gb: 'amazon.co.uk', us: 'amazon.com' };
+// Spotify Premium (Individual) pro Monat, grobe Richtwerte – im Feld änderbar.
+const SPOTIFY_PRICE = { de: 12.99, at: 12.99, ch: 14.9, gb: 12.99, us: 12.99 };
 const QOBUZ_LOCALE = { de: 'de-de', at: 'at-de', ch: 'ch-de', gb: 'gb-en', us: 'us-en' };
 
 const $ = id => document.getElementById(id);
@@ -19,6 +24,8 @@ const state = {
   playlists: [],       // Kandidaten in der Playlist-Auswahl
   results: new Map(),  // Track-ID -> Suchergebnis (für state.country)
   country: 'de',
+  subPrice: null,      // eigener Abo-Preis; null = Richtwert für das Store-Land
+  minPlays: 1,         // nur Titel mit mindestens so vielen Wiedergaben beachten
   owned: loadOwned(),
   running: null,       // AbortController der laufenden Suche
   store: memoryStore(),
@@ -102,9 +109,14 @@ function newClient(extra = {}) {
   return new ItunesClient({ country: state.country, store: state.store, ...extra });
 }
 
-/** Titel, die noch gesucht werden müssen (nicht im Besitz, noch kein Ergebnis). */
+/** Titel, die den Filter „mindestens so oft gehört“ erfüllen. */
+function visibleTracks(tracks = state.tracks) {
+  return filterByPlays(tracks, state.minPlays);
+}
+
+/** Titel, die noch gesucht werden müssen (sichtbar, nicht im Besitz, noch kein Ergebnis). */
 function pendingTracks(tracks = state.tracks) {
-  return tracks.filter(t => !state.owned.has(t.id) && !state.results.has(t.id));
+  return visibleTracks(tracks).filter(t => !state.owned.has(t.id) && !state.results.has(t.id));
 }
 
 // ---------- Sitzung speichern (Titel und Ergebnisse überstehen Neuladen) ----------
@@ -163,7 +175,8 @@ async function updateEstimate() {
   button.disabled = !pending.length;
 
   if (!pending.length) {
-    $('estimate').textContent = state.tracks.length ? 'Alle Titel sind gesucht.' : '';
+    $('estimate').textContent = !state.tracks.length ? ''
+      : visibleTracks().length ? 'Alle Titel sind gesucht.' : 'Kein Titel erreicht diese Hörzahl.';
     return;
   }
   $('estimate').textContent = `${pending.length} Titel zu suchen – Dauer wird berechnet …`;
@@ -183,6 +196,7 @@ function showTracks(tracks, summary) {
   $('playlist-summary').textContent =
     `${summary}: ${tracks.length} Titel von ${albums} ${albums === 1 ? 'Album' : 'Alben'}.`;
   $('search').hidden = false;
+  renderPlaysInfo();
   renderResults();
   updateEstimate();
 }
@@ -400,11 +414,36 @@ async function runSearch() {
   }
 }
 
+function renderPlaysInfo() {
+  const shown = visibleTracks().length;
+  $('plays-info').textContent = state.minPlays > 1
+    ? `${shown} von ${state.tracks.length} Titeln erreichen das${DUMMY_PLAYS ? ' (Dummy-Zahlen, bis die Spotify-Historie da ist)' : ''}.`
+    : DUMMY_PLAYS ? 'Hörzahlen sind vorerst Dummy-Daten, bis die Spotify-Historie da ist.' : '';
+}
+
+function setupPlaysFilter() {
+  const input = $('min-plays');
+  input.value = String(state.minPlays);
+  input.addEventListener('input', () => {
+    const n = Math.floor(Number(input.value));
+    state.minPlays = Number.isFinite(n) && n > 1 ? n : 1;
+    local(MIN_PLAYS_KEY, String(state.minPlays));
+    renderPlaysInfo();
+    renderResults();
+    updateEstimate();
+  });
+}
+
 function setupSearch() {
+  setupPlaysFilter();
+  setupSubPrice();
   $('start').addEventListener('click', runSearch);
   $('country').addEventListener('change', () => {
     state.country = $('country').value;
     local(COUNTRY_KEY, state.country);
+    state.subPrice = null; // eigener Preis gilt nur für das bisherige Land
+    local(SUB_PRICE_KEY, '');
+    renderSubPrice();
     // Preise gelten pro Land – bisherige Ergebnisse passen nicht mehr.
     state.results.clear();
     saveResults(true);
@@ -426,7 +465,7 @@ function setupSearch() {
 // ---------- Ergebnisse ----------
 
 function renderResults() {
-  const results = state.tracks.map(t => state.results.get(t.id)).filter(Boolean);
+  const results = visibleTracks().map(t => state.results.get(t.id)).filter(Boolean);
   $('tracks').hidden = !state.tracks.length;
   $('purchase').hidden = !results.length;
   const plan = buildPurchasePlan(results, state.owned);
@@ -444,14 +483,41 @@ function stat(label, value, highlight) {
     el('span', { class: 'stat-value' }, value));
 }
 
+function subPrice() {
+  return state.subPrice ?? SPOTIFY_PRICE[state.country];
+}
+
+/** Wie viele Monate Streaming-Abo der Betrag kostet, z. B. „ca. 3,2 Monate“. */
+function subscriptionMonths(total) {
+  const price = subPrice();
+  if (!(price > 0)) return '–';
+  const months = total / price;
+  const text = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(months);
+  return `ca. ${text} ${text === '1' ? 'Monat' : 'Monate'}`;
+}
+
+function renderSubPrice() {
+  const input = $('sub-price');
+  input.value = String(subPrice());
+  input.placeholder = String(SPOTIFY_PRICE[state.country]);
+}
+
+function setupSubPrice() {
+  $('sub-price').addEventListener('input', e => {
+    const v = Number(e.target.value.replace(',', '.'));
+    state.subPrice = v > 0 ? v : null;
+    local(SUB_PRICE_KEY, state.subPrice == null ? '' : String(state.subPrice));
+    renderResults();
+  });
+}
+
 function renderStats(plan) {
-  const searched = state.tracks.filter(t => !state.owned.has(t.id) && state.results.has(t.id));
+  const searched = visibleTracks().filter(t => !state.owned.has(t.id) && state.results.has(t.id));
   const found = searched.filter(t => state.results.get(t.id).match).length;
   const open = pendingTracks().length;
-  const saving = plan.singlesTotal - plan.total;
   $('stats').replaceChildren(
     stat('Gesamtpreis', money(plan.total, plan.currency)),
-    stat('Ersparnis durch Alben', money(saving > 0.004 ? saving : 0, plan.currency), saving > 0.004),
+    stat('Entspricht Spotify-Abo', subscriptionMonths(plan.total)),
     stat(open ? `Gefunden (${open} noch offen)` : 'Gefunden', `${found} / ${searched.length}`),
   );
 }
@@ -495,54 +561,71 @@ function renderTrackRows(plan) {
     if (item.type === 'album') for (const id of item.covers) inAlbum.set(id, item);
   }
 
-  const rows = state.tracks.map(t => {
-    const r = state.results.get(t.id);
-    const owned = state.owned.has(t.id);
-    const term = `${t.artists[0] ?? ''} ${t.name}`;
-
-    const checkbox = el('input', {
-      type: 'checkbox',
-      checked: owned,
-      'aria-label': `${t.name} habe ich schon`,
-      onchange: e => {
-        if (e.target.checked) state.owned.add(t.id); else state.owned.delete(t.id);
-        saveOwned();
-        renderResults();
-        updateEstimate();
-      },
-    });
-
-    let found;
-    let price;
-    if (r?.match) {
-      const [cls, label] = CONFIDENCE_TAG[r.confidence];
-      found = el('td', {},
-        link(withStoreParam(r.match.trackViewUrl), r.match.trackName),
-        ' ', el('span', { class: `tag ${cls}`, title: `Übereinstimmung ${Math.round(r.score * 100)} %` }, label),
-        el('span', { class: 'sub' }, `${r.match.artistName} · ${r.match.collectionName}`));
-      price = el('td', { class: 'col-num' },
-        r.match.trackPrice > 0 ? money(r.match.trackPrice, r.match.currency) : 'nur Album',
-        inAlbum.has(t.id) && !owned ? el('span', { class: 'sub' }, 'im Album') : null);
-    } else if (r) {
-      found = el('td', {},
-        el('span', { class: 'tag bad' }, 'nicht gefunden'),
-        r.candidate
-          ? el('span', { class: 'sub' }, 'Ähnlichster Treffer: ', link(withStoreParam(r.candidate.trackViewUrl), `${r.candidate.artistName} – ${r.candidate.trackName}`))
-          : null);
-      price = el('td', { class: 'col-num' }, '–');
-    } else {
-      found = el('td', {}, el('span', { class: 'sub' }, owned ? '–' : 'noch nicht gesucht'));
-      price = el('td', { class: 'col-num' }, '');
+  const rows = [];
+  let group = null;
+  const multi = new Set(state.tracks.map(t => t.playlists?.[0])).size > 1;
+  for (const t of visibleTracks()) {
+    const first = t.playlists?.[0];
+    if (multi && first !== group) {
+      group = first;
+      const count = visibleTracks().filter(x => x.playlists?.[0] === first).length;
+      rows.push(el('tr', { class: 'group' },
+        el('th', { colspan: 6, scope: 'colgroup' }, first ?? 'Ohne Playlist', el('span', { class: 'count' }, ` · ${count} Titel`))));
     }
-
-    return el('tr', { class: owned ? 'owned' : null },
-      el('td', { class: 'col-owned' }, checkbox),
-      el('td', {}, t.name, el('span', { class: 'sub' }, `${t.artists.join(', ')} · ${t.album}`)),
-      found,
-      price,
-      el('td', {}, shopLinks(term, 'track')));
-  });
+    rows.push(trackRow(t, inAlbum));
+  }
   $('track-rows').replaceChildren(...rows);
+}
+
+function trackRow(t, inAlbum) {
+  const r = state.results.get(t.id);
+  const owned = state.owned.has(t.id);
+  const term = `${t.artists[0] ?? ''} ${t.name}`;
+
+  const checkbox = el('input', {
+    type: 'checkbox',
+    checked: owned,
+    'aria-label': `${t.name} habe ich schon`,
+    onchange: e => {
+      if (e.target.checked) state.owned.add(t.id); else state.owned.delete(t.id);
+      saveOwned();
+      renderResults();
+      updateEstimate();
+    },
+  });
+
+  let found;
+  let price;
+  if (r?.match) {
+    const [cls, label] = CONFIDENCE_TAG[r.confidence];
+    found = el('td', {},
+      link(withStoreParam(r.match.trackViewUrl), r.match.trackName),
+      ' ', el('span', { class: `tag ${cls}`, title: `Übereinstimmung ${Math.round(r.score * 100)} %` }, label),
+      el('span', { class: 'sub' }, `${r.match.artistName} · ${r.match.collectionName}`));
+    price = el('td', { class: 'col-num' },
+      r.match.trackPrice > 0 ? money(r.match.trackPrice, r.match.currency) : 'nur Album',
+      inAlbum.has(t.id) && !owned ? el('span', { class: 'sub' }, 'im Album') : null);
+  } else if (r) {
+    found = el('td', {},
+      el('span', { class: 'tag bad' }, 'nicht gefunden'),
+      r.candidate
+        ? el('span', { class: 'sub' }, 'Ähnlichster Treffer: ', link(withStoreParam(r.candidate.trackViewUrl), `${r.candidate.artistName} – ${r.candidate.trackName}`))
+        : null);
+    price = el('td', { class: 'col-num' }, '–');
+  } else {
+    found = el('td', {}, el('span', { class: 'sub' }, owned ? '–' : 'noch nicht gesucht'));
+    price = el('td', { class: 'col-num' }, '');
+  }
+
+  const others = (t.playlists ?? []).slice(1);
+  return el('tr', { class: owned ? 'owned' : null },
+    el('td', { class: 'col-owned' }, checkbox),
+    el('td', {}, t.name, el('span', { class: 'sub' }, `${t.artists.join(', ')} · ${t.album}`),
+      others.length ? el('span', { class: 'sub' }, `Auch in: ${others.join(', ')}`) : null),
+    el('td', { class: 'col-num' }, `${playCount(t)}×`),
+    found,
+    price,
+    el('td', {}, shopLinks(term, 'track')));
 }
 
 // ---------- Start ----------
@@ -551,7 +634,12 @@ async function init() {
   const savedCountry = local(COUNTRY_KEY);
   if (savedCountry && AMAZON_DOMAIN[savedCountry]) $('country').value = savedCountry;
   state.country = $('country').value;
+  renderSubPrice();
   $('notify').checked = local(NOTIFY_KEY) === '1';
+  const savedMin = Math.floor(Number(local(MIN_PLAYS_KEY)));
+  if (savedMin > 1) state.minPlays = savedMin;
+  const savedSub = Number(local(SUB_PRICE_KEY));
+  if (savedSub > 0) state.subPrice = savedSub;
 
   setupImport();
   setupSearch();

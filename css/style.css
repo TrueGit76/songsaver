@@ -86,8 +86,11 @@ main > * { min-width: 0; } /* sonst drückt die breite Tabelle die Karte auf */
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 12px; }
 
 .field { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
-select, button { font: inherit; }
-select {
+select, button, input[type=number] { font: inherit; }
+input[type=number] { width: 7rem; }
+.sub-price { margin: 12px 0 0; }
+#plays-info { margin: 0 0 9px; }
+select, input[type=number] {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -233,3 +236,6 @@ table.tracks { width: 100%; border-collapse: collapse; min-width: 720px; }
 .estimate { margin: 0; font-weight: 600; }
 .check { display: flex; gap: 8px; align-items: center; margin-top: 12px; color: var(--muted); font-size: .9rem; cursor: pointer; }
 button.primary.secondary { background: var(--border); color: var(--text); }
+
+tr.group th { text-align: left; background: var(--accent-soft); padding: 8px 10px; }
+tr.group .count { color: var(--muted); font-weight: 400; }

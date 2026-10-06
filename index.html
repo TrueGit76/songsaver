@@ -58,6 +58,13 @@
     <section class="card" id="search" hidden>
       <h2>2. Preise suchen</h2>
       <p id="playlist-summary"></p>
+      <div class="row">
+        <label class="field">
+          <span>Mindestens so oft gehört</span>
+          <input type="number" id="min-plays" min="1" step="1" value="1" inputmode="numeric">
+        </label>
+        <p class="hint" id="plays-info" aria-live="polite"></p>
+      </div>
       <p class="estimate" id="estimate" aria-live="polite"></p>
       <div class="row">
         <label class="field">
@@ -87,6 +94,10 @@
       <h2>3. Einkaufsliste</h2>
       <p class="hint" id="purchase-note" hidden>Die Suche ist noch nicht abgeschlossen – die Liste ist vorläufig.</p>
       <div class="stats" id="stats"></div>
+      <label class="field sub-price">
+        <span>Spotify-Abo pro Monat (für den Vergleich)</span>
+        <input type="number" id="sub-price" min="0.01" step="0.01" inputmode="decimal">
+      </label>
       <ul class="purchase-list" id="purchase-list"></ul>
     </section>
 
@@ -99,6 +110,7 @@
             <tr>
               <th scope="col" class="col-owned">Habe ich</th>
               <th scope="col">Titel aus der Playlist</th>
+              <th scope="col" class="col-num">Gehört</th>
               <th scope="col">Gefunden bei iTunes</th>
               <th scope="col" class="col-num">Preis</th>
               <th scope="col">Weitere Links</th>

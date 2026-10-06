@@ -137,3 +137,16 @@ test('Titel: „Original Mix“ ist die normale Fassung', () => {
   assert.deepEqual(versionMarkers('Long Life (Original Mix)'), []);
   assert.deepEqual(versionMarkers('Long Life - Extended Mix'), ['mix']);
 });
+
+import { playCount, filterByPlays } from '../js/plays.js';
+
+test('Dummy-Hörzahlen sind stabil, im Bereich und filtern nach Minimum', () => {
+  const tracks = Array.from({ length: 300 }, (_, i) => ({ id: `spotify:track:${i}` }));
+  const counts = tracks.map(playCount);
+  assert.deepEqual(counts, tracks.map(playCount));
+  assert.ok(counts.every(c => Number.isInteger(c) && c >= 1 && c <= 200));
+  assert.equal(filterByPlays(tracks, 1).length, 300);
+  const top = filterByPlays(tracks, 50);
+  assert.ok(top.length > 0 && top.length < 300);
+  assert.ok(top.every(t => playCount(t) >= 50));
+});

@@ -45,16 +45,23 @@ export async function loadPlaylistFiles(files) {
   return { playlists, errors };
 }
 
-/** Führt Playlists zusammen; ein Song, der in mehreren Playlists steht, wird nur einmal gekauft. */
+/** Führt Playlists zusammen; ein Song, der in mehreren Playlists steht, wird nur einmal gekauft;
+ * jeder Titel merkt sich in `playlists`, in welchen Playlists er steht. */
 export function mergePlaylists(playlists) {
-  const seen = new Set();
+  const byId = new Map();
   const tracks = [];
   let duplicates = 0;
   for (const p of playlists) {
     for (const t of p.tracks) {
-      if (seen.has(t.id)) { duplicates++; continue; }
-      seen.add(t.id);
-      tracks.push(t);
+      const known = byId.get(t.id);
+      if (known) {
+        duplicates++;
+        if (!known.playlists.includes(p.name)) known.playlists.push(p.name);
+        continue;
+      }
+      const merged = { ...t, playlists: [p.name] }; // Kopie: die Playlist-Objekte bleiben unverändert
+      byId.set(t.id, merged);
+      tracks.push(merged);
     }
   }
   return { tracks, duplicates };
