@@ -83,3 +83,8 @@ export function bestNameSimilarity(candidate, names) {
   }
   return best;
 }
+
+/** Albumtitel ohne Zusätze wie „(Deluxe Edition)“ oder „[Remastered]“, damit die Suche mehr Treffer findet. */
+export function plainAlbumTitle(title) {
+  return title.replace(/\s*[([][^)\]]*(deluxe|edition|remaster|expanded|anniversary|version|bonus)[^)\]]*[)\]]/gi, '').trim() || title;
+}

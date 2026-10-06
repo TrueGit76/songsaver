@@ -3,9 +3,11 @@ import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
 import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam, hasPrice } from './matcher.js';
 import { openStore, memoryStore } from './store.js';
 import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
+import { plainAlbumTitle } from './text.js';
 import { playCount, filterByPlays, DUMMY_PLAYS } from './plays.js';
 
 const OWNED_KEY = 'songsaver:owned';
+const OWNED_ALBUMS_KEY = 'songsaver:ownedAlbums';
 const COUNTRY_KEY = 'songsaver:country';
 const NOTIFY_KEY = 'songsaver:notify';
 const MIN_PLAYS_KEY = 'songsaver:minPlays';
@@ -31,6 +33,7 @@ const state = {
   cacheDays: 7,        // 0 = unbegrenzt
   minPlays: 1,         // nur Titel mit mindestens so vielen Wiedergaben beachten
   owned: loadOwned(),
+  ownedAlbums: loadOwnedAlbums(), // Albumschlüssel -> { key, title, artist, artwork, covers } (als vorhanden markiert)
   running: null,       // AbortController der laufenden Suche
   store: memoryStore(),
 };
@@ -93,6 +96,37 @@ function saveOwned() {
   local(OWNED_KEY, JSON.stringify([...state.owned]));
 }
 
+function loadOwnedAlbums() {
+  try { return new Map(JSON.parse(local(OWNED_ALBUMS_KEY) ?? '[]').map(a => [a.key, a])); } catch { return new Map(); }
+}
+
+function saveOwnedAlbums() {
+  local(OWNED_ALBUMS_KEY, JSON.stringify([...state.ownedAlbums.values()]));
+}
+
+function albumKey(artist, title) {
+  return `${artist}|${plainAlbumTitle(title)}`.toLowerCase();
+}
+
+/**
+ * Album als vorhanden markieren: alle Titel daraus gelten als „habe ich“. Das Album bleibt mit seinem
+ * Haken sichtbar (Merkzettel in ownedAlbums), damit man es wieder zurücknehmen kann.
+ */
+function setAlbumOwned(album, owned) {
+  const key = albumKey(album.artist, album.title);
+  if (owned) {
+    state.ownedAlbums.set(key, { key, title: album.title, artist: album.artist, artwork: album.artwork ?? null, covers: [...album.covers] });
+    for (const id of album.covers) state.owned.add(id);
+  } else {
+    for (const id of state.ownedAlbums.get(key)?.covers ?? album.covers) state.owned.delete(id);
+    state.ownedAlbums.delete(key);
+  }
+  saveOwned();
+  saveOwnedAlbums();
+  renderResults();
+  updateEstimate();
+}
+
 function showError(id, message) {
   const node = $(id);
   node.textContent = message ?? '';
@@ -111,11 +145,6 @@ function shopLinks(term, kind) {
 
 const EBAY_DOMAIN = { de: 'ebay.de', at: 'ebay.at', ch: 'ebay.ch', gb: 'ebay.co.uk', us: 'ebay.com' };
 const DE_SHOPS = ['de', 'at', 'ch'];
-
-/** Albumtitel ohne Zusätze wie „(Deluxe Edition)“ oder „[Remastered]“, damit die Suche mehr Treffer findet. */
-function plainAlbumTitle(title) {
-  return title.replace(/\s*[([][^)\]]*(deluxe|edition|remaster|expanded|anniversary|version|bonus)[^)\]]*[)\]]/gi, '').trim() || title;
-}
 
 /** Suchlinks für das Album in weiteren Shops, getrennt nach CD/Vinyl und Download. Es sind Suchen, keine Treffer. */
 function albumShops(artist, title, bandcampUrl = null) {
@@ -561,14 +590,32 @@ function renderAlbums(plan) {
     .sort((a, b) => b.covers.length - a.covers.length || plays(b) - plays(a));
   const singles = plan.items.length - albums.length;
 
-  $('albums').hidden = !albums.length;
-  if (!albums.length) return;
-  const albumTotal = albums.reduce((sum, a) => sum + a.price, 0);
-  $('albums-summary').textContent =
-    `${albums.length} ${albums.length === 1 ? 'Album' : 'Alben'} für ${money(albumTotal, plan.currency)} decken ${albums.reduce((n, a) => n + a.distinct, 0)} Titel ab` +
-    (singles ? `, dazu ${singles} Einzeltitel (unten in der Tabelle).` : '.');
+  // Als vorhanden markierte Alben bleiben sichtbar, solange sie zur aktuellen Auswahl gehören.
+  const visible = new Set(visibleTracks().map(t => t.id));
+  const recommended = new Set(albums.map(a => albumKey(a.artist, a.title)));
+  const owned = [...state.ownedAlbums.values()]
+    .filter(a => !recommended.has(a.key) && a.covers.some(id => visible.has(id)));
 
-  $('album-list').replaceChildren(...albums.map(item => {
+  $('albums').hidden = !albums.length && !owned.length;
+  if ($('albums').hidden) {
+    $('albums-summary').textContent = '';
+    $('album-list').replaceChildren();
+    return;
+  }
+  const albumTotal = albums.reduce((sum, a) => sum + a.price, 0);
+  const parts = [];
+  if (albums.length) {
+    parts.push(`${albums.length} ${albums.length === 1 ? 'Album' : 'Alben'} für ${money(albumTotal, plan.currency)} decken ${albums.reduce((n, a) => n + a.distinct, 0)} Titel ab` +
+      (singles ? `, dazu ${singles} Einzeltitel (unten in der Tabelle).` : '.'));
+  }
+  if (owned.length) parts.push(`${owned.length} ${owned.length === 1 ? 'Album' : 'Alben'} als vorhanden markiert.`);
+  $('albums-summary').textContent = parts.join(' ');
+
+  const haveBox = (album, checked) => el('label', { class: 'check album-owned' },
+    el('input', { type: 'checkbox', checked, onchange: e => setAlbumOwned(album, e.target.checked) }),
+    'Habe ich schon');
+
+  const cards = albums.map(item => {
     const tag = el('span', { class: 'tag good' }, `spart ${money(item.singlesSum - item.price, plan.currency)} gegenüber Einzelkauf`);
     const artist = albumArtist(item);
     const site = artist ? state.artistSites.get(artist.toLowerCase())?.website : null;
@@ -582,8 +629,18 @@ function renderAlbums(plan) {
         albumShops(item.artist, item.title, artist ? state.artistSites.get(artist.toLowerCase())?.bandcamp : null)),
       el('div', { class: 'album-side' },
         el('span', { class: 'price' }, money(item.price, plan.currency)),
-        link(item.url, 'Album bei iTunes', 'buy')));
-  }));
+        link(item.url, 'Album bei iTunes', 'buy'),
+        haveBox(item, false)));
+  });
+
+  const ownedCards = owned.map(a => el('li', { class: 'album owned' },
+    el('img', { src: a.artwork ?? '', alt: '', loading: 'lazy' }),
+    el('div', {},
+      el('div', { class: 'album-title' }, a.title),
+      el('div', { class: 'album-meta' }, a.artist, ` · ${a.covers.filter(id => visible.has(id)).length} Titel aus deiner Auswahl, nicht eingerechnet`)),
+    el('div', { class: 'album-side' }, haveBox(a, true))));
+
+  $('album-list').replaceChildren(...cards, ...ownedCards);
 }
 
 // ---------- Künstler-Websites (nur für Alben mit einem Künstler) ----------
@@ -719,7 +776,14 @@ function trackRow(t, buyCell) {
     checked: owned,
     'aria-label': `${t.name} habe ich schon`,
     onchange: e => {
-      if (e.target.checked) state.owned.add(t.id); else state.owned.delete(t.id);
+      if (e.target.checked) {
+        state.owned.add(t.id);
+      } else {
+        state.owned.delete(t.id);
+        // Ein Titel zurückgenommen: das ganze Album gilt nicht mehr als vorhanden.
+        for (const [key, a] of state.ownedAlbums) if (a.covers.includes(t.id)) state.ownedAlbums.delete(key);
+        saveOwnedAlbums();
+      }
       saveOwned();
       renderResults();
       updateEstimate();
