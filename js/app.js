@@ -109,6 +109,38 @@ function shopLinks(term, kind) {
   );
 }
 
+const EBAY_DOMAIN = { de: 'ebay.de', at: 'ebay.at', ch: 'ebay.ch', gb: 'ebay.co.uk', us: 'ebay.com' };
+const DE_SHOPS = ['de', 'at', 'ch'];
+
+/** Albumtitel ohne Zusätze wie „(Deluxe Edition)“ oder „[Remastered]“, damit die Suche mehr Treffer findet. */
+function plainAlbumTitle(title) {
+  return title.replace(/\s*[([][^)\]]*(deluxe|edition|remaster|expanded|anniversary|version|bonus)[^)\]]*[)\]]/gi, '').trim() || title;
+}
+
+/** Suchlinks für das Album in weiteren Shops, getrennt nach CD/Vinyl und Download. Es sind Suchen, keine Treffer. */
+function albumShops(artist, title) {
+  const term = `${artist} ${plainAlbumTitle(title)}`.trim();
+  const q = encodeURIComponent(term);
+  const de = DE_SHOPS.includes(state.country);
+  const physical = [
+    ['Amazon', `https://www.${AMAZON_DOMAIN[state.country]}/s?k=${q}&i=popular`],
+    ['eBay', `https://www.${EBAY_DOMAIN[state.country]}/sch/i.html?_nkw=${q}&_sacat=176984`],
+    de && ['Medimops', `https://www.medimops.de/produkte-C0/?fcIsSearch=1&searchparam=${q}`],
+    de && ['Rebuy', `https://www.rebuy.de/kaufen/suchen?q=${q}`],
+    de && ['JPC', `https://www.jpc.de/s/${q}`],
+    de && ['Kleinanzeigen', `https://www.kleinanzeigen.de/s-${encodeURIComponent(term.replace(/\s+/g, '-'))}/k0`],
+    ['Discogs', `https://www.discogs.com/search/?q=${q}&type=release`],
+  ].filter(Boolean);
+  const digital = [
+    ['Bandcamp', `https://bandcamp.com/search?q=${q}&item_type=a`],
+    ['Qobuz', `https://www.qobuz.com/${QOBUZ_LOCALE[state.country]}/search?q=${q}`],
+  ];
+  const group = (label, shops) => el('div', { class: 'shop-group' },
+    el('span', { class: 'shop-group-label' }, label),
+    el('span', { class: 'shop-links' }, shops.map(([name, href]) => link(href, name))));
+  return el('div', { class: 'album-shops' }, group('CD / Vinyl suchen bei', physical), group('Download suchen bei', digital));
+}
+
 function newClient(extra = {}) {
   const cacheTtlMs = state.cacheDays > 0 ? state.cacheDays * 24 * 60 * 60 * 1000 : Infinity;
   return new ItunesClient({ country: state.country, store: state.store, cacheTtlMs, ...extra });
@@ -545,7 +577,8 @@ function renderAlbums(plan) {
         el('div', { class: 'album-title' }, item.title),
         el('div', { class: 'album-meta' }, item.artist, site ? [' · ', link(site, 'Website')] : null),
         el('div', { class: 'album-meta' },
-          `${item.distinct} von ${item.trackCount} Titeln aus deiner Auswahl · zusammen ${plays(item)}× gehört `, tag)),
+          `${item.distinct} von ${item.trackCount} Titeln aus deiner Auswahl · zusammen ${plays(item)}× gehört `, tag),
+        albumShops(item.artist, item.title)),
       el('div', { class: 'album-side' },
         el('span', { class: 'price' }, money(item.price, plan.currency)),
         link(item.url, 'Album bei iTunes', 'buy')));
