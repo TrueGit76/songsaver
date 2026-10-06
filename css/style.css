@@ -143,20 +143,6 @@ button.primary:disabled { opacity: .5; cursor: progress; }
 .stat-value { display: block; font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stat.highlight .stat-value { color: var(--good); }
 
-.purchase-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.purchase {
-  display: grid;
-  grid-template-columns: 56px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-.purchase img { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; background: var(--border); }
-.purchase-title { font-weight: 600; }
-.purchase-meta { color: var(--muted); font-size: .85rem; }
-.purchase-side { text-align: right; display: grid; gap: 4px; justify-items: end; }
 .price { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .buy {
   display: inline-block;
@@ -196,12 +182,6 @@ table.tracks { width: 100%; border-collapse: collapse; min-width: 720px; }
 
 .site-footer { color: var(--muted); font-size: .8rem; padding-block: 8px 32px; }
 
-@media (max-width: 560px) {
-  .purchase { grid-template-columns: 44px 1fr; }
-  .purchase img { width: 44px; height: 44px; }
-  .purchase-side { grid-column: 2; justify-items: start; text-align: left; grid-auto-flow: column; align-items: center; justify-content: start; gap: 12px; }
-}
-
 .steps { margin: 0 0 16px; padding-left: 1.4em; display: grid; gap: 6px; }
 .dropzone-text .sub { margin-top: 2px; }
 
@@ -239,3 +219,7 @@ button.primary.secondary { background: var(--border); color: var(--text); }
 
 tr.group th { text-align: left; background: var(--accent-soft); padding: 8px 10px; }
 tr.group .count { color: var(--muted); font-weight: 400; }
+
+.tracks .col-buy { min-width: 170px; }
+.tracks td.col-buy .buy { margin-left: 10px; }
+.list-hint { margin-top: 16px; }

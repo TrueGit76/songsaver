@@ -90,20 +90,17 @@
       <p class="error" id="search-error" hidden></p>
     </section>
 
-    <section class="card" id="purchase" hidden>
-      <h2>3. Einkaufsliste</h2>
-      <p class="hint" id="purchase-note" hidden>Die Suche ist noch nicht abgeschlossen – die Liste ist vorläufig.</p>
-      <div class="stats" id="stats"></div>
-      <label class="field sub-price">
-        <span>Spotify-Abo pro Monat (für den Vergleich)</span>
-        <input type="number" id="sub-price" min="0.01" step="0.01" inputmode="decimal">
-      </label>
-      <ul class="purchase-list" id="purchase-list"></ul>
-    </section>
-
     <section class="card" id="tracks" hidden>
-      <h2>Alle Titel</h2>
-      <p class="hint">Hake Titel ab, die du schon besitzt – sie werden nicht gesucht und nicht eingerechnet.</p>
+      <h2>3. Titel und Einkauf</h2>
+      <div id="purchase" hidden>
+        <p class="hint" id="purchase-note" hidden>Die Suche ist noch nicht abgeschlossen – die Summen sind vorläufig.</p>
+        <div class="stats" id="stats"></div>
+        <label class="field sub-price">
+          <span>Spotify-Abo pro Monat (für den Vergleich)</span>
+          <input type="number" id="sub-price" min="0.01" step="0.01" inputmode="decimal">
+        </label>
+      </div>
+      <p class="hint list-hint">Hake Titel ab, die du schon besitzt – sie werden nicht gesucht und nicht eingerechnet.</p>
       <div class="table-scroll">
         <table class="tracks">
           <thead>
@@ -112,7 +109,7 @@
               <th scope="col">Titel aus der Playlist</th>
               <th scope="col" class="col-num">Gehört</th>
               <th scope="col">Gefunden bei iTunes</th>
-              <th scope="col" class="col-num">Preis</th>
+              <th scope="col" class="col-buy">Kaufen</th>
               <th scope="col">Weitere Links</th>
             </tr>
           </thead>

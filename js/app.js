@@ -171,8 +171,10 @@ async function updateEstimate() {
   const run = ++estimateRun;
   const pending = pendingTracks();
   const button = $('start');
-  button.textContent = state.results.size ? 'Weitersuchen' : 'Preise suchen';
+  button.textContent = !pending.length && visibleTracks().length && state.results.size ? 'Alles gesucht ✓'
+    : state.results.size ? 'Weitersuchen' : 'Preise suchen';
   button.disabled = !pending.length;
+  button.title = pending.length ? '' : 'Nichts mehr zu suchen. Ändere die Hörzahl oder die Playlists, um weitere Titel zu suchen.';
 
   if (!pending.length) {
     $('estimate').textContent = !state.tracks.length ? ''
@@ -474,7 +476,6 @@ function renderResults() {
 
   $('purchase-note').hidden = pendingTracks().length === 0;
   renderStats(plan);
-  renderPurchaseList(plan);
 }
 
 function stat(label, value, highlight) {
@@ -522,33 +523,6 @@ function renderStats(plan) {
   );
 }
 
-function renderPurchaseList(plan) {
-  const items = plan.items.map(item => {
-    let meta;
-    let tag = null;
-    if (item.type === 'album') {
-      meta = `Album · ${item.trackCount} Titel · enthält ${item.covers.length} aus deiner Playlist`;
-      if (item.reason === 'cheaper') tag = el('span', { class: 'tag good' }, `spart ${money(item.singlesSum - item.price, plan.currency)}`);
-      else if (item.reason === 'same') tag = el('span', { class: 'tag good' }, 'gleicher Preis, mehr Musik');
-      else tag = el('span', { class: 'tag info' }, 'nur als Album erhältlich');
-    } else {
-      meta = 'Einzeltitel';
-    }
-    return el('li', { class: 'purchase' },
-      el('img', { src: item.artwork ?? '', alt: '', loading: 'lazy' }),
-      el('div', {},
-        el('div', { class: 'purchase-title' }, item.title),
-        el('div', { class: 'purchase-meta' }, `${item.artist} · ${meta} `, tag)),
-      el('div', { class: 'purchase-side' },
-        el('span', { class: 'price' }, money(item.price, plan.currency)),
-        link(item.url, 'Bei iTunes', 'buy')));
-  });
-  if (!items.length) {
-    items.push(el('li', { class: 'hint' }, 'Nichts zu kaufen – alle gefundenen Titel sind als „habe ich“ markiert.'));
-  }
-  $('purchase-list').replaceChildren(...items);
-}
-
 const CONFIDENCE_TAG = {
   hoch: ['good', 'sicher'],
   mittel: ['warn', 'bitte prüfen'],
@@ -556,10 +530,11 @@ const CONFIDENCE_TAG = {
 };
 
 function renderTrackRows(plan) {
-  const inAlbum = new Map();
-  for (const item of plan.items) {
-    if (item.type === 'album') for (const id of item.covers) inAlbum.set(id, item);
-  }
+  // Track-ID -> Einkaufsposten (Einzeltitel oder Album), das den Titel abdeckt.
+  const itemOf = new Map();
+  for (const item of plan.items) for (const id of item.covers) itemOf.set(id, item);
+  const shownAlbums = new Set();
+  const buyCell = (t, r) => buyColumn(t, r, itemOf.get(t.id), plan.currency, shownAlbums);
 
   const rows = [];
   let group = null;
@@ -572,12 +547,35 @@ function renderTrackRows(plan) {
       rows.push(el('tr', { class: 'group' },
         el('th', { colspan: 6, scope: 'colgroup' }, first ?? 'Ohne Playlist', el('span', { class: 'count' }, ` · ${count} Titel`))));
     }
-    rows.push(trackRow(t, inAlbum));
+    rows.push(trackRow(t, buyCell));
   }
   $('track-rows').replaceChildren(...rows);
 }
 
-function trackRow(t, inAlbum) {
+/** Kaufen-Spalte: Preis und Link des Einkaufspostens, der den Titel abdeckt. */
+function buyColumn(t, r, item, currency, shownAlbums) {
+  const cell = (...children) => el('td', { class: 'col-buy' }, ...children);
+  if (state.owned.has(t.id) || !r) return cell();
+  if (!r.match) return cell('–');
+  if (!item) return cell(el('span', { class: 'sub' }, 'nur im Album, kein Albumpreis – nicht kaufbar'));
+
+  if (item.type === 'track') {
+    return cell(el('span', { class: 'price' }, money(item.price, currency)), link(item.url, 'Bei iTunes', 'buy'));
+  }
+  // Album: Preis und Link nur einmal, an der ersten Zeile; die übrigen Titel verweisen darauf.
+  if (shownAlbums.has(item)) return cell(el('span', { class: 'sub' }, `über Album „${item.title}“`));
+  shownAlbums.add(item);
+  let tag;
+  if (item.reason === 'cheaper') tag = el('span', { class: 'tag good' }, `spart ${money(item.singlesSum - item.price, currency)}`);
+  else if (item.reason === 'same') tag = el('span', { class: 'tag good' }, 'gleicher Preis, mehr Musik');
+  else tag = el('span', { class: 'tag info' }, 'nur als Album erhältlich');
+  return cell(
+    el('span', { class: 'price' }, money(item.price, currency)),
+    link(item.url, 'Album bei iTunes', 'buy'),
+    el('span', { class: 'sub' }, `Album „${item.title}“ · ${item.trackCount} Titel, ${item.covers.length} aus deiner Playlist `, tag));
+}
+
+function trackRow(t, buyCell) {
   const r = state.results.get(t.id);
   const owned = state.owned.has(t.id);
   const term = `${t.artists[0] ?? ''} ${t.name}`;
@@ -595,26 +593,20 @@ function trackRow(t, inAlbum) {
   });
 
   let found;
-  let price;
   if (r?.match) {
     const [cls, label] = CONFIDENCE_TAG[r.confidence];
     found = el('td', {},
       link(withStoreParam(r.match.trackViewUrl), r.match.trackName),
       ' ', el('span', { class: `tag ${cls}`, title: `Übereinstimmung ${Math.round(r.score * 100)} %` }, label),
       el('span', { class: 'sub' }, `${r.match.artistName} · ${r.match.collectionName}`));
-    price = el('td', { class: 'col-num' },
-      r.match.trackPrice > 0 ? money(r.match.trackPrice, r.match.currency) : 'nur Album',
-      inAlbum.has(t.id) && !owned ? el('span', { class: 'sub' }, 'im Album') : null);
   } else if (r) {
     found = el('td', {},
       el('span', { class: 'tag bad' }, 'nicht gefunden'),
       r.candidate
         ? el('span', { class: 'sub' }, 'Ähnlichster Treffer: ', link(withStoreParam(r.candidate.trackViewUrl), `${r.candidate.artistName} – ${r.candidate.trackName}`))
         : null);
-    price = el('td', { class: 'col-num' }, '–');
   } else {
     found = el('td', {}, el('span', { class: 'sub' }, owned ? '–' : 'noch nicht gesucht'));
-    price = el('td', { class: 'col-num' }, '');
   }
 
   const others = (t.playlists ?? []).slice(1);
@@ -624,7 +616,7 @@ function trackRow(t, inAlbum) {
       others.length ? el('span', { class: 'sub' }, `Auch in: ${others.join(', ')}`) : null),
     el('td', { class: 'col-num' }, `${playCount(t)}×`),
     found,
-    price,
+    buyCell(t, r),
     el('td', {}, shopLinks(term, 'track')));
 }
 
