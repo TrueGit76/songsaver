@@ -223,3 +223,18 @@ tr.group .count { color: var(--muted); font-weight: 400; }
 .tracks .col-buy { min-width: 170px; }
 .tracks td.col-buy .buy { margin-left: 10px; }
 .list-hint { margin-top: 16px; }
+
+.albums { margin-top: 20px; }
+.albums h3, .table-title { margin: 0 0 4px; font-size: 1.05rem; }
+.table-title { margin-top: 24px; }
+.album-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.album { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
+.album img { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; background: var(--border); }
+.album-title { font-weight: 600; }
+.album-meta { color: var(--muted); font-size: .85rem; }
+.album-side { display: grid; gap: 4px; justify-items: end; }
+@media (max-width: 560px) {
+  .album { grid-template-columns: 44px 1fr; }
+  .album img { width: 44px; height: 44px; }
+  .album-side { grid-column: 2; grid-auto-flow: column; justify-content: start; align-items: center; justify-items: start; gap: 12px; }
+}

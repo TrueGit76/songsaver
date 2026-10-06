@@ -65,7 +65,7 @@ for (const [name, viewport, colorScheme] of [['desktop', { width: 1100, height: 
   await page.waitForFunction(() => document.getElementById('estimate').textContent.includes('Alle Titel sind gesucht'), null, { timeout: 120_000 });
   const stats = await text(page, '#stats');
   const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-  console.log(`${name}: ${stats} | ${await page.locator('#track-rows a.buy').count()} Kaufposten | ${itunesRequests} iTunes-Anfragen insgesamt | Seitenbreite ${pageWidth}px`);
+  console.log(`${name}: ${stats} | ${await page.locator('#album-list a.buy, #track-rows a.buy').count()} Kaufposten | ${itunesRequests} iTunes-Anfragen insgesamt | Seitenbreite ${pageWidth}px`);
   check(stats.includes('13 / 13'), `${name}: nicht alle Titel gefunden`);
   check(pageWidth <= viewport.width, `${name}: horizontaler Überlauf`);
 

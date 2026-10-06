@@ -49,7 +49,8 @@ export function confidenceLabel(score) {
   return 'niedrig';
 }
 
-function hasPrice(c) {
+/** Einzeln kaufbar? Titel, die es nur im Album gibt, haben keinen Einzelpreis. */
+export function hasPrice(c) {
   return typeof c.trackPrice === 'number' && c.trackPrice > 0;
 }
 
@@ -206,7 +207,9 @@ export function buildPurchasePlan(results, owned = new Set()) {
 
   for (const r of results) {
     if (owned.has(r.track.id)) continue;
-    if (!r.match) { unmatched.push(r); continue; }
+    // Titel ohne Einzelpreis (nur im Album erhältlich) zählen wie nicht gefunden
+    // und lösen keine Album-Empfehlung aus.
+    if (!r.match || !hasPrice(r.match)) { unmatched.push(r); continue; }
     currency ??= r.match.currency;
     const id = r.match.collectionId;
     if (!byCollection.has(id)) byCollection.set(id, []);
@@ -220,14 +223,13 @@ export function buildPurchasePlan(results, owned = new Set()) {
   for (const rs of byCollection.values()) {
     const album = rs[0].match;
     const albumPrice = album.collectionPrice > 0 ? album.collectionPrice : null;
-    const buyable = rs.filter(r => hasPrice(r.match));
-    const albumOnly = rs.filter(r => !hasPrice(r.match));
-    const singlesSum = round(buyable.reduce((s, r) => s + r.match.trackPrice, 0));
+    // Dieselbe Aufnahme kann unter mehreren Spotify-Einträgen in der Auswahl stehen (Single, Album, Sampler);
+    // gekauft und gezählt wird sie nur einmal.
+    const unique = [...new Map(rs.map(r => [trackKey(r), r])).values()];
+    const singlesSum = round(unique.reduce((s, r) => s + r.match.trackPrice, 0));
 
-    const mustBuyAlbum = albumOnly.length > 0 && albumPrice !== null;
-    const albumCheaper = albumPrice !== null && rs.length >= 2 && albumPrice <= singlesSum;
-
-    if (mustBuyAlbum || albumCheaper) {
+    // Album nur, wenn es wirklich billiger ist als die Einzeltitel.
+    if (albumPrice !== null && unique.length >= 2 && albumPrice < singlesSum) {
       items.push({
         type: 'album',
         title: album.collectionName,
@@ -237,16 +239,14 @@ export function buildPurchasePlan(results, owned = new Set()) {
         artwork: album.artworkUrl100,
         trackCount: album.trackCount,
         covers: rs.map(r => r.track.id),
-        reason: albumCheaper
-          ? (albumPrice < singlesSum ? 'cheaper' : 'same')
-          : 'albumOnly',
+        distinct: unique.length, // verschiedene Titel des Albums (covers kann Doppelte enthalten)
+        reason: 'cheaper',
         singlesSum,
       });
       total += albumPrice;
-      // Ohne Album-Option hätte man nur die einzeln kaufbaren Titel bekommen.
-      singlesTotal += albumCheaper ? singlesSum : albumPrice;
+      singlesTotal += singlesSum;
     } else {
-      for (const r of buyable) {
+      for (const r of unique) {
         items.push({
           type: 'track',
           title: r.match.trackName,
@@ -254,17 +254,19 @@ export function buildPurchasePlan(results, owned = new Set()) {
           price: r.match.trackPrice,
           url: withStoreParam(r.match.trackViewUrl),
           artwork: r.match.artworkUrl100,
-          covers: [r.track.id],
+          covers: rs.filter(x => trackKey(x) === trackKey(r)).map(x => x.track.id),
         });
         total += r.match.trackPrice;
         singlesTotal += r.match.trackPrice;
       }
-      // Nur im Album erhältlich, aber kein Albumpreis bekannt -> nicht kaufbar.
-      for (const r of albumOnly) unmatched.push({ ...r, notBuyable: true });
     }
   }
 
   return { items, total: round(total), singlesTotal: round(singlesTotal), currency, unmatched };
+}
+
+function trackKey(r) {
+  return r.match.trackId ?? `${r.match.trackName}|${r.match.trackTimeMillis}`;
 }
 
 function round(n) {

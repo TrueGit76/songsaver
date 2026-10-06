@@ -1,6 +1,6 @@
 import { loadPlaylistFiles, mergePlaylists } from './playlists.js';
 import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
-import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam } from './matcher.js';
+import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam, hasPrice } from './matcher.js';
 import { openStore, memoryStore } from './store.js';
 import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
 import { playCount, filterByPlays, DUMMY_PLAYS } from './plays.js';
@@ -393,7 +393,7 @@ async function runSearch() {
         renderResults();
       },
     });
-    const found = pending.filter(t => state.results.get(t.id)?.match).length;
+    const found = pending.filter(t => isBuyable(state.results.get(t.id))).length;
     lastLine = `Fertig: ${found} von ${pending.length} Titeln im iTunes Store gefunden.`;
     notifyDone(lastLine);
   } catch (err) {
@@ -478,7 +478,40 @@ function renderResults() {
 
   $('purchase-note').hidden = pendingTracks().length === 0;
   renderStats(plan);
+  renderAlbums(plan);
   queueArtistSites(plan);
+}
+
+/** Empfohlene Alben, die meisten Titel aus der Auswahl zuerst, bei Gleichstand die meistgehörten. */
+function renderAlbums(plan) {
+  const byId = new Map(state.tracks.map(t => [t.id, t]));
+  const plays = item => item.covers.reduce((sum, id) => sum + (byId.has(id) ? playCount(byId.get(id)) : 0), 0);
+  const albums = plan.items.filter(i => i.type === 'album')
+    .sort((a, b) => b.covers.length - a.covers.length || plays(b) - plays(a));
+  const singles = plan.items.length - albums.length;
+
+  $('albums').hidden = !albums.length;
+  if (!albums.length) return;
+  const albumTotal = albums.reduce((sum, a) => sum + a.price, 0);
+  $('albums-summary').textContent =
+    `${albums.length} ${albums.length === 1 ? 'Album' : 'Alben'} für ${money(albumTotal, plan.currency)} decken ${albums.reduce((n, a) => n + a.distinct, 0)} Titel ab` +
+    (singles ? `, dazu ${singles} Einzeltitel (unten in der Tabelle).` : '.');
+
+  $('album-list').replaceChildren(...albums.map(item => {
+    const tag = el('span', { class: 'tag good' }, `spart ${money(item.singlesSum - item.price, plan.currency)} gegenüber Einzelkauf`);
+    const artist = albumArtist(item);
+    const site = artist ? state.artistSites.get(artist.toLowerCase()) : null;
+    return el('li', { class: 'album' },
+      el('img', { src: item.artwork ?? '', alt: '', loading: 'lazy' }),
+      el('div', {},
+        el('div', { class: 'album-title' }, item.title),
+        el('div', { class: 'album-meta' }, item.artist, site ? [' · ', link(site, 'Website')] : null),
+        el('div', { class: 'album-meta' },
+          `${item.distinct} von ${item.trackCount} Titeln aus deiner Auswahl · zusammen ${plays(item)}× gehört `, tag)),
+      el('div', { class: 'album-side' },
+        el('span', { class: 'price' }, money(item.price, plan.currency)),
+        link(item.url, 'Album bei iTunes', 'buy')));
+  }));
 }
 
 // ---------- Künstler-Websites (nur für Alben mit einem Künstler) ----------
@@ -517,6 +550,11 @@ async function runArtistWorker() {
   }
 }
 
+/** Gefunden und einzeln kaufbar – nur im Album erhältliche Titel zählen als nicht gefunden. */
+function isBuyable(r) {
+  return Boolean(r?.match && hasPrice(r.match));
+}
+
 function stat(label, value, highlight) {
   return el('div', { class: highlight ? 'stat highlight' : 'stat' },
     el('span', { class: 'stat-label' }, label),
@@ -553,7 +591,7 @@ function setupSubPrice() {
 
 function renderStats(plan) {
   const searched = visibleTracks().filter(t => !state.owned.has(t.id) && state.results.has(t.id));
-  const found = searched.filter(t => state.results.get(t.id).match).length;
+  const found = searched.filter(t => isBuyable(state.results.get(t.id))).length;
   const open = pendingTracks().length;
   $('stats').replaceChildren(
     stat('Gesamtpreis', money(plan.total, plan.currency)),
@@ -572,8 +610,7 @@ function renderTrackRows(plan) {
   // Track-ID -> Einkaufsposten (Einzeltitel oder Album), das den Titel abdeckt.
   const itemOf = new Map();
   for (const item of plan.items) for (const id of item.covers) itemOf.set(id, item);
-  const shownAlbums = new Set();
-  const buyCell = (t, r) => buyColumn(t, r, itemOf.get(t.id), plan.currency, shownAlbums);
+  const buyCell = (t, r) => buyColumn(t, r, itemOf.get(t.id), plan.currency);
 
   const rows = [];
   let group = null;
@@ -591,30 +628,13 @@ function renderTrackRows(plan) {
   $('track-rows').replaceChildren(...rows);
 }
 
-/** Kaufen-Spalte: Preis und Link des Einkaufspostens, der den Titel abdeckt. */
-function buyColumn(t, r, item, currency, shownAlbums) {
+/** Kaufen-Spalte: Einzeltitel mit Preis und Link, Titel in einem empfohlenen Album nur mit Verweis darauf. */
+function buyColumn(t, r, item, currency) {
   const cell = (...children) => el('td', { class: 'col-buy' }, ...children);
   if (state.owned.has(t.id) || !r) return cell();
-  if (!r.match) return cell('–');
-  if (!item) return cell(el('span', { class: 'sub' }, 'nur im Album, kein Albumpreis – nicht kaufbar'));
-
-  if (item.type === 'track') {
-    return cell(el('span', { class: 'price' }, money(item.price, currency)), link(item.url, 'Bei iTunes', 'buy'));
-  }
-  // Album: Preis und Link nur einmal, an der ersten Zeile; die übrigen Titel verweisen darauf.
-  if (shownAlbums.has(item)) return cell(el('span', { class: 'sub' }, `über Album „${item.title}“`));
-  shownAlbums.add(item);
-  let tag;
-  if (item.reason === 'cheaper') tag = el('span', { class: 'tag good' }, `spart ${money(item.singlesSum - item.price, currency)}`);
-  else if (item.reason === 'same') tag = el('span', { class: 'tag good' }, 'gleicher Preis, mehr Musik');
-  else tag = el('span', { class: 'tag info' }, 'nur als Album erhältlich');
-  const artist = albumArtist(item);
-  const site = artist ? state.artistSites.get(artist.toLowerCase()) : null;
-  return cell(
-    el('span', { class: 'price' }, money(item.price, currency)),
-    link(item.url, 'Album bei iTunes', 'buy'),
-    el('span', { class: 'sub' }, `Album „${item.title}“ · ${item.trackCount} Titel, ${item.covers.length} aus deiner Playlist `, tag),
-    site ? el('span', { class: 'sub' }, link(site, `Website von ${artist}`)) : null);
+  if (!isBuyable(r) || !item) return cell('–');
+  if (item.type === 'album') return cell(el('span', { class: 'tag info' }, 'Album'), el('span', { class: 'sub' }, `„${item.title}“ (siehe oben)`));
+  return cell(el('span', { class: 'price' }, money(item.price, currency)), link(item.url, 'Bei iTunes', 'buy'));
 }
 
 function trackRow(t, buyCell) {
@@ -635,17 +655,18 @@ function trackRow(t, buyCell) {
   });
 
   let found;
-  if (r?.match) {
+  if (isBuyable(r)) {
     const [cls, label] = CONFIDENCE_TAG[r.confidence];
     found = el('td', {},
       link(withStoreParam(r.match.trackViewUrl), r.match.trackName),
       ' ', el('span', { class: `tag ${cls}`, title: `Übereinstimmung ${Math.round(r.score * 100)} %` }, label),
       el('span', { class: 'sub' }, `${r.match.artistName} · ${r.match.collectionName}`));
   } else if (r) {
+    const near = r.match ?? r.candidate; // auch „nur im Album“-Treffer als Hinweis
     found = el('td', {},
       el('span', { class: 'tag bad' }, 'nicht gefunden'),
-      r.candidate
-        ? el('span', { class: 'sub' }, 'Ähnlichster Treffer: ', link(withStoreParam(r.candidate.trackViewUrl), `${r.candidate.artistName} – ${r.candidate.trackName}`))
+      near
+        ? el('span', { class: 'sub' }, `${r.match ? 'Nur im Album erhältlich: ' : 'Ähnlichster Treffer: '}`, link(withStoreParam(near.trackViewUrl), `${near.artistName} – ${near.trackName}`))
         : null);
   } else {
     found = el('td', {}, el('span', { class: 'sub' }, owned ? '–' : 'noch nicht gesucht'));

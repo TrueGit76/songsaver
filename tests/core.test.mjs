@@ -86,10 +86,21 @@ test('Einkauf: wenige Titel eines Albums werden einzeln gekauft', () => {
   assert.equal(plan.total, 2.58);
 });
 
-test('Einkauf: „nur als Album“ erzwingt den Albumkauf', () => {
-  const plan = buildPurchasePlan([match('a', -1, 1, 9.99)]);
-  assert.equal(plan.items[0].type, 'album');
-  assert.equal(plan.items[0].reason, 'albumOnly');
+test('Einkauf: Titel „nur im Album“ gelten als nicht gefunden und erzwingen kein Album', () => {
+  const plan = buildPurchasePlan([match('a', -1, 1, 9.99), match('b', 1.29, 1, 9.99)]);
+  assert.deepEqual(plan.items.map(i => [i.type, i.covers[0]]), [['track', 'b']]);
+  assert.deepEqual(plan.unmatched.map(r => r.track.id), ['a']);
+  assert.equal(plan.total, 1.29);
+});
+
+test('Einkauf: Album nur, wenn es billiger ist als die Einzeltitel', () => {
+  // 9 Titel à 1,11 = 9,99 = Albumpreis -> kein Vorteil, also einzeln
+  const same = buildPurchasePlan(Array.from({ length: 9 }, (_, i) => match(`t${i}`, 1.11, 1, 9.99)));
+  assert.ok(same.items.every(i => i.type === 'track'));
+  // Titel ohne Einzelpreis zählen nicht zur Einzelsumme mit
+  const mixed = buildPurchasePlan([...Array.from({ length: 8 }, (_, i) => match(`t${i}`, 1.29, 1, 9.99)), match('x', -1, 1, 9.99)]);
+  assert.equal(mixed.items.filter(i => i.type === 'album').length, 1);
+  assert.equal(mixed.items[0].covers.length, 8);
 });
 
 test('Einkauf: bereits gekaufte Titel zählen nicht', () => {
@@ -149,4 +160,22 @@ test('Dummy-Hörzahlen sind stabil, im Bereich und filtern nach Minimum', () => 
   const top = filterByPlays(tracks, 50);
   assert.ok(top.length > 0 && top.length < 300);
   assert.ok(top.every(t => playCount(t) >= 50));
+});
+
+test('Einkauf: dieselbe Aufnahme mehrfach in der Auswahl wird nur einmal gezählt und bezahlt', () => {
+  const dup = (id, trackId) => { const r = match(id, 1.29, 1, 9.99); r.match.trackId = trackId; return r; };
+  // 8 verschiedene Titel, 3 davon zusätzlich unter einer zweiten Spotify-ID
+  const results = [...Array.from({ length: 8 }, (_, i) => dup(`t${i}`, i)), dup('t0b', 0), dup('t1b', 1), dup('t2b', 2)];
+  const plan = buildPurchasePlan(results);
+  const album = plan.items[0];
+  assert.equal(plan.items.length, 1);
+  assert.equal(album.distinct, 8);
+  assert.equal(album.covers.length, 11);
+  assert.equal(album.singlesSum, 10.32);
+  assert.equal(plan.total, 9.99);
+
+  const few = buildPurchasePlan([dup('a', 1), dup('a2', 1)]);
+  assert.equal(few.items.length, 1, 'ein Titel, einmal bezahlt');
+  assert.deepEqual(few.items[0].covers, ['a', 'a2']);
+  assert.equal(few.total, 1.29);
 });
