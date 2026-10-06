@@ -83,6 +83,20 @@
         <input type="checkbox" id="notify">
         Benachrichtigen, wenn die Suche fertig ist (Tab muss offen bleiben)
       </label>
+      <div class="row cache-row">
+        <label class="field">
+          <span>Abfrageergebnisse merken für</span>
+          <select id="cache-days">
+            <option value="1">1 Tag</option>
+            <option value="7">7 Tage</option>
+            <option value="30">30 Tage</option>
+            <option value="365">1 Jahr</option>
+            <option value="0">unbegrenzt</option>
+          </select>
+        </label>
+        <button type="button" class="link-button" id="cache-clear">Gespeicherte Daten löschen</button>
+        <p class="hint" id="cache-info"></p>
+      </div>
       <div class="progress" id="progress" hidden>
         <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
         <p class="progress-text" id="progress-text" aria-live="polite"></p>

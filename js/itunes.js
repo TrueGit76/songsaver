@@ -3,7 +3,7 @@
 const BASE = 'https://itunes.apple.com';
 export const MIN_INTERVAL_MS = 3100;
 const RETRY_WAIT_MS = 60_000;
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEFAULT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Nur diese Felder werden gebraucht – hält den Cache klein.
 const FIELDS = [
@@ -26,9 +26,11 @@ export class ItunesClient {
    * @param {object|null} [opts.store]  Speicher aus store.js (get/set) für den Cache
    * @param {Function} [opts.fetch]
    * @param {Function} [opts.sleep]
+   * @param {number} [opts.cacheTtlMs]  wie lange Antworten gelten (Infinity = unbegrenzt)
    * @param {Function} [opts.onWait]  wird mit (ms, grund) aufgerufen, bevor länger gewartet wird
    */
-  constructor({ country, store = null, fetch = globalThis.fetch.bind(globalThis), sleep, onWait, minIntervalMs = MIN_INTERVAL_MS } = {}) {
+  constructor({ country, store = null, fetch = globalThis.fetch.bind(globalThis), sleep, onWait, minIntervalMs = MIN_INTERVAL_MS, cacheTtlMs = DEFAULT_CACHE_TTL_MS } = {}) {
+    this.cacheTtlMs = cacheTtlMs;
     this.country = country;
     this.store = store;
     this.fetch = fetch;
@@ -99,7 +101,7 @@ export class ItunesClient {
     if (!this.store) return null;
     try {
       const entry = await this.store.get('cache', url);
-      return entry && Date.now() - entry.at < CACHE_TTL_MS ? entry.results : null;
+      return entry && Date.now() - entry.at < this.cacheTtlMs ? entry.results : null;
     } catch {
       return null;
     }

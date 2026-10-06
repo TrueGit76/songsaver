@@ -68,3 +68,17 @@ test('Pause: Suche stoppt mit AbortError, bisherige Ergebnisse sind gemeldet', a
   );
   assert.deepEqual(seen, ['A']);
 });
+
+test('Cache: Gültigkeitsdauer ist einstellbar (unbegrenzt behält auch alte Einträge)', async () => {
+  const url = `https://itunes.apple.com/search?${new URLSearchParams({ term: 'x', entity: 'song', media: 'music', limit: 25, country: 'de' })}`;
+  const store = memoryStore();
+  await store.set('cache', url, { at: Date.now() - 400 * 24 * 60 * 60 * 1000, results: [{ trackName: 'alt' }] });
+
+  const week = new ItunesClient({ country: 'de', store });
+  assert.equal(await week.peekSongs('x'), null, 'nach 7 Tagen abgelaufen');
+  const forever = new ItunesClient({ country: 'de', store, cacheTtlMs: Infinity });
+  assert.deepEqual(await forever.peekSongs('x'), [{ trackName: 'alt' }]);
+  assert.equal(await store.count('cache'), 1);
+  await store.clear('cache');
+  assert.equal(await store.count('cache'), 0);
+});

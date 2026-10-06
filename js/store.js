@@ -10,6 +10,8 @@ export function memoryStore() {
     async get(store, key) { return maps[store].get(key); },
     async set(store, key, value) { maps[store].set(key, value); },
     async delete(store, key) { maps[store].delete(key); },
+    async count(store) { return maps[store].size; },
+    async clear(store) { maps[store].clear(); },
   };
 }
 
@@ -34,6 +36,8 @@ export async function openStore() {
       get: (store, key) => request(tx(store, 'readonly').get(key)),
       set: (store, key, value) => request(tx(store, 'readwrite').put(value, key)),
       delete: (store, key) => request(tx(store, 'readwrite').delete(key)),
+      count: store => request(tx(store, 'readonly').count()),
+      clear: store => request(tx(store, 'readwrite').clear()),
     };
   } catch {
     return memoryStore();

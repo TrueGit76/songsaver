@@ -89,6 +89,8 @@ main > * { min-width: 0; } /* sonst drückt die breite Tabelle die Karte auf */
 select, button, input[type=number] { font: inherit; }
 input[type=number] { width: 7rem; }
 .sub-price { margin: 12px 0 0; }
+#cache-info { margin: 0 0 9px; }
+.cache-row { align-items: end; }
 #plays-info { margin: 0 0 9px; }
 select, input[type=number] {
   padding: 8px 10px;

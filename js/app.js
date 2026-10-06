@@ -9,6 +9,7 @@ const OWNED_KEY = 'songsaver:owned';
 const COUNTRY_KEY = 'songsaver:country';
 const NOTIFY_KEY = 'songsaver:notify';
 const MIN_PLAYS_KEY = 'songsaver:minPlays';
+const CACHE_DAYS_KEY = 'songsaver:cacheDays';
 const SUB_PRICE_KEY = 'songsaver:subPrice';
 const APP_TITLE = document.title;
 
@@ -27,6 +28,7 @@ const state = {
   artistSites: new Map(), // Künstlername (klein) -> Website-URL oder null (nicht gefunden)
   country: 'de',
   subPrice: null,      // eigener Abo-Preis; null = Richtwert für das Store-Land
+  cacheDays: 7,        // 0 = unbegrenzt
   minPlays: 1,         // nur Titel mit mindestens so vielen Wiedergaben beachten
   owned: loadOwned(),
   running: null,       // AbortController der laufenden Suche
@@ -108,7 +110,8 @@ function shopLinks(term, kind) {
 }
 
 function newClient(extra = {}) {
-  return new ItunesClient({ country: state.country, store: state.store, ...extra });
+  const cacheTtlMs = state.cacheDays > 0 ? state.cacheDays * 24 * 60 * 60 * 1000 : Infinity;
+  return new ItunesClient({ country: state.country, store: state.store, cacheTtlMs, ...extra });
 }
 
 /** Titel, die den Filter „mindestens so oft gehört“ erfüllen. */
@@ -215,10 +218,7 @@ function applyPlaylists(playlists) {
   let summary = playlists.length === 1 ? `„${playlists[0].name}“` : `${playlists.length} Playlists`;
   if (duplicates) summary += ` (${duplicates} doppelte Titel nur einmal gezählt)`;
 
-  // Bereits gesuchte Titel behalten, falls sie wieder dabei sind.
-  const ids = new Set(tracks.map(t => t.id));
-  for (const id of [...state.results.keys()]) if (!ids.has(id)) state.results.delete(id);
-
+  // Bereits gesuchte Titel bleiben gespeichert, auch wenn sie gerade nicht ausgewählt sind.
   $('progress').hidden = true;
   showError('search-error', null);
   showTracks(tracks, summary);
@@ -415,6 +415,7 @@ async function runSearch() {
     await saveResults(true);
     renderResults();
     updateEstimate();
+    renderCacheInfo();
   }
 }
 
@@ -423,6 +424,42 @@ function renderPlaysInfo() {
   $('plays-info').textContent = state.minPlays > 1
     ? `${shown} von ${state.tracks.length} Titeln erreichen das${DUMMY_PLAYS ? ' (Dummy-Zahlen, bis die Spotify-Historie da ist)' : ''}.`
     : DUMMY_PLAYS ? 'Hörzahlen sind vorerst Dummy-Daten, bis die Spotify-Historie da ist.' : '';
+}
+
+async function renderCacheInfo() {
+  let count = 0;
+  try { count = await state.store.count('cache'); } catch { /* nur Anzeige */ }
+  $('cache-info').textContent = count
+    ? `${count} Abfragen und ${state.results.size} Ergebnisse gespeichert.`
+    : 'Noch nichts gespeichert.';
+}
+
+function setupCache() {
+  const select = $('cache-days');
+  select.value = String(state.cacheDays);
+  select.addEventListener('change', async () => {
+    state.cacheDays = Number(select.value);
+    local(CACHE_DAYS_KEY, String(state.cacheDays));
+    if (state.cacheDays > 7) await requestPersistentStorage();
+    updateEstimate();
+  });
+  $('cache-clear').addEventListener('click', async () => {
+    if (state.running) return;
+    if (!confirm('Alle gespeicherten Abfrageergebnisse löschen? Die nächste Suche fragt dann alles neu bei iTunes ab.')) return;
+    try { await state.store.clear('cache'); } catch { /* s. o. */ }
+    state.results.clear();
+    state.artistSites.clear();
+    await saveResults(true);
+    $('progress').hidden = true;
+    renderResults();
+    updateEstimate();
+    renderCacheInfo();
+  });
+}
+
+/** Bittet den Browser, die Daten nicht von selbst zu löschen, wenn der Speicher knapp wird. */
+async function requestPersistentStorage() {
+  try { await navigator.storage?.persist?.(); } catch { /* nur Komfort */ }
 }
 
 function setupPlaysFilter() {
@@ -441,6 +478,7 @@ function setupPlaysFilter() {
 function setupSearch() {
   setupPlaysFilter();
   setupSubPrice();
+  setupCache();
   $('start').addEventListener('click', runSearch);
   $('country').addEventListener('change', () => {
     state.country = $('country').value;
@@ -693,6 +731,8 @@ async function init() {
   $('notify').checked = local(NOTIFY_KEY) === '1';
   const savedMin = Math.floor(Number(local(MIN_PLAYS_KEY)));
   if (savedMin > 1) state.minPlays = savedMin;
+  const savedDays = local(CACHE_DAYS_KEY);
+  if (savedDays !== null && [0, 1, 7, 30, 365].includes(Number(savedDays))) state.cacheDays = Number(savedDays);
   const savedSub = Number(local(SUB_PRICE_KEY));
   if (savedSub > 0) state.subPrice = savedSub;
 
@@ -700,6 +740,8 @@ async function init() {
   setupSearch();
   state.store = await openStore();
   await restoreSession();
+  renderCacheInfo();
+  if (state.cacheDays > 7) requestPersistentStorage();
 }
 
 init();
