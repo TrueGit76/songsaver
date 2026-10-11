@@ -149,17 +149,73 @@ test('Titel: „Original Mix“ ist die normale Fassung', () => {
   assert.deepEqual(versionMarkers('Long Life - Extended Mix'), ['mix']);
 });
 
-import { playCount, filterByPlays } from '../js/plays.js';
+import { playCount, filterByPlays, parseHistory, extractHistoryFiles, isHistoryFile, setHistory } from '../js/plays.js';
 
-test('Dummy-Hörzahlen sind stabil, im Bereich und filtern nach Minimum', () => {
-  const tracks = Array.from({ length: 300 }, (_, i) => ({ id: `spotify:track:${i}` }));
-  const counts = tracks.map(playCount);
-  assert.deepEqual(counts, tracks.map(playCount));
-  assert.ok(counts.every(c => Number.isInteger(c) && c >= 1 && c <= 200));
-  assert.equal(filterByPlays(tracks, 1).length, 300);
-  const top = filterByPlays(tracks, 50);
-  assert.ok(top.length > 0 && top.length < 300);
-  assert.ok(top.every(t => playCount(t) >= 50));
+const jsonFile = (name, rows) => ({ name, bytes: new TextEncoder().encode(JSON.stringify(rows)) });
+const play = (uri, title, artist, ms, reason = 'fwdbtn') => ({
+  spotify_track_uri: uri, master_metadata_track_name: title, master_metadata_album_artist_name: artist, ms_played: ms, reason_end: reason,
+});
+
+test('Streamingverlauf: Wiedergaben ab 30 Sekunden oder bis zum Ende zählen, Podcasts und Anspielen nicht', () => {
+  const h = parseHistory([jsonFile('Streaming_History_Audio_2020.json', [
+    play('spotify:track:a', 'Karma Police', 'Radiohead', 264000, 'trackdone'),
+    play('spotify:track:a', 'Karma Police', 'Radiohead', 31000),
+    play('spotify:track:a', 'Karma Police', 'Radiohead', 4000),                  // übersprungen
+    play('spotify:track:b', 'Kurzer Song', 'Band', 12000, 'trackdone'),          // sehr kurz, aber durchgelaufen
+    { spotify_track_uri: null, master_metadata_track_name: null, episode_name: 'Folge 1', ms_played: 900000 },
+    play('spotify:track:a2', 'Karma Police - Remastered 2009', 'Radiohead', 60000), // andere URI, gleicher Song
+  ])]);
+  assert.equal(h.plays, 4);
+  assert.equal(h.uris['spotify:track:a'], 2);
+  assert.equal(h.errors.length, 0);
+
+  setHistory(h);
+  assert.equal(playCount({ id: 'spotify:track:a', name: 'Karma Police', artists: ['Radiohead'] }), 3);
+  // Playlist-Titel mit anderer ID wird über Künstler und Titel gefunden
+  assert.equal(playCount({ id: 'spotify:track:x', name: 'Karma Police', artists: ['Radiohead'] }), 3);
+  assert.equal(playCount({ id: 'spotify:track:b', name: 'Kurzer Song', artists: ['Band'] }), 1);
+  assert.equal(playCount({ id: 'spotify:track:z', name: 'Unbekannt', artists: ['Niemand'] }), 0);
+  setHistory(null);
+});
+
+test('Streamingverlauf: Filter nach Mindestanzahl; ohne Verlauf keine Zahlen und kein Filter', () => {
+  const tracks = [
+    { id: 'spotify:track:1', name: 'Eins', artists: ['A'] },
+    { id: 'spotify:track:2', name: 'Zwei', artists: ['B'] },
+  ];
+  assert.equal(playCount(tracks[0]), null);
+  assert.equal(filterByPlays(tracks, 5).length, 2);
+  const rows = Array.from({ length: 6 }, () => play('spotify:track:1', 'Eins', 'A', 200000, 'trackdone'));
+  setHistory(parseHistory([jsonFile('Streaming_History_Audio_2021.json', rows)]));
+  assert.deepEqual(filterByPlays(tracks, 5).map(t => t.id), ['spotify:track:1']);
+  assert.equal(filterByPlays(tracks, 1).length, 2);
+  setHistory(null);
+});
+
+test('Streamingverlauf: älteres Kontoformat ohne URI wird über Namen gezählt; kaputte Dateien melden Fehler', () => {
+  const h = parseHistory([
+    jsonFile('StreamingHistory0.json', [{ endTime: '2020-01-01 10:00', artistName: 'Radiohead', trackName: 'Karma Police', msPlayed: 200000 }]),
+    { name: 'Streaming_History_Audio_2022.json', bytes: new TextEncoder().encode('kein json') },
+  ]);
+  assert.equal(h.plays, 1);
+  assert.equal(h.errors.length, 1);
+  setHistory(h);
+  assert.equal(playCount({ id: 'x', name: 'Karma Police', artists: ['Radiohead'] }), 1);
+  setHistory(null);
+});
+
+test('Streamingverlauf: Dateinamen erkannt, Exportify-Dateien bleiben bei den Playlists', async () => {
+  assert.ok(isHistoryFile('Spotify Extended Streaming History/Streaming_History_Audio_2013.json'));
+  assert.ok(isHistoryFile('StreamingHistory_music_0.json'));
+  assert.ok(isHistoryFile('StreamingHistory0.json'));
+  assert.ok(!isHistoryFile('Spotify Extended Streaming History/Streaming_History_Video_2017.json'));
+  assert.ok(!isHistoryFile('meine_playlist.csv'));
+  const { readFileSync } = await import('node:fs');
+  const zip = { name: 'export_all.zip', bytes: new Uint8Array(readFileSync(new URL('./fixtures/export_all.zip', import.meta.url))) };
+  const csv = { name: 'a.csv', bytes: new TextEncoder().encode('x') };
+  const { history, rest } = await extractHistoryFiles([zip, csv, jsonFile('Streaming_History_Audio_2020.json', [])]);
+  assert.equal(history.length, 1);
+  assert.deepEqual(rest.map(f => f.name), ['export_all.zip', 'a.csv']);
 });
 
 test('Einkauf: dieselbe Aufnahme mehrfach in der Auswahl wird nur einmal gezählt und bezahlt', () => {

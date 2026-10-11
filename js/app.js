@@ -4,7 +4,7 @@ import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam, has
 import { openStore, memoryStore } from './store.js';
 import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
 import { plainAlbumTitle } from './text.js';
-import { playCount, filterByPlays, DUMMY_PLAYS } from './plays.js';
+import { playCount, filterByPlays, hasHistory, getHistory, setHistory, parseHistory, extractHistoryFiles } from './plays.js';
 
 const OWNED_KEY = 'songsaver:owned';
 const OWNED_ALBUMS_KEY = 'songsaver:ownedAlbums';
@@ -207,6 +207,14 @@ function saveResults(now = false) {
   return null;
 }
 
+async function restoreHistory() {
+  try {
+    const saved = await state.store.get('session', 'history');
+    if (saved?.uris && saved?.names) setHistory(saved);
+  } catch { /* ohne gespeicherten Verlauf weiter */ }
+  renderPlaysInfo();
+}
+
 async function restoreSession() {
   try {
     const saved = await state.store.get('session', 'tracks');
@@ -289,14 +297,42 @@ function applyPlaylists(playlists) {
   $('start').focus();
 }
 
+/** Übernimmt den Streamingverlauf, merkt ihn sich und zeigt die Hörzahlen an; gibt Fehlermeldungen zurück. */
+async function applyHistory(files) {
+  const parsed = parseHistory(files);
+  if (!parsed.plays) {
+    return [...parsed.errors, 'Im Streamingverlauf wurden keine gehörten Titel gefunden.'];
+  }
+  setHistory(parsed);
+  try { await state.store.set('session', 'history', parsed); } catch { /* nur Komfort */ }
+  refreshPlays();
+  return parsed.errors;
+}
+
+/** Zeigt Hörzahlen, Filter und Schätzung nach einer Änderung des Verlaufs neu an. */
+function refreshPlays() {
+  renderPlaysInfo();
+  if (!state.tracks.length) return;
+  renderResults();
+  updateEstimate();
+}
+
 async function readFiles(fileList) {
   const files = [...(fileList ?? [])];
   if (!files.length || state.running) return;
   showError('import-error', null);
   $('picker').hidden = true;
 
-  const inputs = await Promise.all(files.map(async f => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
-  const { playlists, errors } = await loadPlaylistFiles(inputs);
+  const all = await Promise.all(files.map(async f => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
+  const { history, rest: inputs } = await extractHistoryFiles(all);
+  const historyErrors = history.length ? await applyHistory(history) : [];
+  if (!inputs.length) {
+    if (historyErrors.length) showError('import-error', historyErrors.join('\n'));
+    return;
+  }
+
+  const { playlists, errors: playlistErrors } = await loadPlaylistFiles(inputs);
+  const errors = [...historyErrors, ...playlistErrors];
   const usable = playlists.filter(p => p.tracks.length);
   if (errors.length) showError('import-error', errors.join('\n'));
 
@@ -482,10 +518,16 @@ async function runSearch() {
 }
 
 function renderPlaysInfo() {
+  const withHistory = hasHistory();
+  $('plays-row').hidden = !withHistory;
   const shown = visibleTracks().length;
-  $('plays-info').textContent = state.minPlays > 1
-    ? `${shown} von ${state.tracks.length} Titeln erreichen das${DUMMY_PLAYS ? ' (Dummy-Zahlen, bis die Spotify-Historie da ist)' : ''}.`
-    : DUMMY_PLAYS ? 'Hörzahlen sind vorerst Dummy-Daten, bis die Spotify-Historie da ist.' : '';
+  $('plays-info').textContent = !withHistory ? ''
+    : state.minPlays > 1 ? `${shown} von ${state.tracks.length} Titeln erreichen das.` : '';
+  const h = getHistory();
+  $('history-info').textContent = h
+    ? `Streamingverlauf geladen: ${h.plays.toLocaleString('de-DE')} Wiedergaben von ${Object.keys(h.names).length.toLocaleString('de-DE')} Titeln.`
+    : '';
+  $('history-clear').hidden = !h;
 }
 
 async function renderCacheInfo() {
@@ -525,6 +567,11 @@ async function requestPersistentStorage() {
 }
 
 function setupPlaysFilter() {
+  $('history-clear').addEventListener('click', async () => {
+    setHistory(null);
+    try { await state.store.delete('session', 'history'); } catch { /* s. o. */ }
+    refreshPlays();
+  });
   const input = $('min-plays');
   input.value = String(state.minPlays);
   input.addEventListener('input', () => {
@@ -585,7 +632,7 @@ function renderResults() {
 /** Empfohlene Alben, die meisten Titel aus der Auswahl zuerst, bei Gleichstand die meistgehörten. */
 function renderAlbums(plan) {
   const byId = new Map(state.tracks.map(t => [t.id, t]));
-  const plays = item => item.covers.reduce((sum, id) => sum + (byId.has(id) ? playCount(byId.get(id)) : 0), 0);
+  const plays = item => item.covers.reduce((sum, id) => sum + (byId.has(id) ? (playCount(byId.get(id)) ?? 0) : 0), 0);
   const albums = plan.items.filter(i => i.type === 'album')
     .sort((a, b) => b.covers.length - a.covers.length || plays(b) - plays(a));
   const singles = plan.items.length - albums.length;
@@ -625,7 +672,7 @@ function renderAlbums(plan) {
         el('div', { class: 'album-title' }, item.title),
         el('div', { class: 'album-meta' }, item.artist, site ? [' · ', link(site, 'Website')] : null),
         el('div', { class: 'album-meta' },
-          `${item.distinct} von ${item.trackCount} Titeln aus deiner Auswahl · zusammen ${plays(item)}× gehört `, tag),
+          `${item.distinct} von ${item.trackCount} Titeln aus deiner Auswahl${hasHistory() ? ` · zusammen ${plays(item)}× gehört` : ''} `, tag),
         albumShops(item.artist, item.title, artist ? state.artistSites.get(artist.toLowerCase())?.bandcamp : null)),
       el('div', { class: 'album-side' },
         el('span', { class: 'price' }, money(item.price, plan.currency)),
@@ -813,7 +860,7 @@ function trackRow(t, buyCell) {
     el('td', { class: 'col-owned' }, checkbox),
     el('td', {}, t.name, el('span', { class: 'sub' }, `${t.artists.join(', ')} · ${t.album}`),
       others.length ? el('span', { class: 'sub' }, `Auch in: ${others.join(', ')}`) : null),
-    el('td', { class: 'col-num' }, `${playCount(t)}×`),
+    el('td', { class: 'col-num' }, playCount(t) === null ? '–' : `${playCount(t)}×`),
     found,
     buyCell(t, r),
     el('td', {}, shopLinks(term, 'track')));
@@ -837,6 +884,7 @@ async function init() {
   setupImport();
   setupSearch();
   state.store = await openStore();
+  await restoreHistory();
   await restoreSession();
   renderCacheInfo();
   if (state.cacheDays > 7) requestPersistentStorage();

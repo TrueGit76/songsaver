@@ -279,3 +279,6 @@ tr.group .count { color: var(--muted); font-weight: 400; }
 }
 
 .site-footer { color: var(--muted); font-size: .8rem; padding-block: 12px 36px; }
+
+.history-info { margin: 12px 0 0; color: var(--accent); }
+.history-info:empty { display: none; }

@@ -6,7 +6,7 @@ Die App läuft komplett im Browser (statische Seite, kein Server, kein Build-Sch
 
 Vor der Suche zeigt die App eine Zeitschätzung für die aktuelle Auswahl. Gesucht wird nur auf Klick; die Suche lässt sich pausieren und nach einem Neuladen fortsetzen (Titel, Ergebnisse und ein 7-Tage-Cache liegen in IndexedDB). Optional meldet eine Browser-Benachrichtigung das Ende der Suche.
 
-Mit „Mindestens so oft gehört“ lassen sich nur die meistgehörten Titel anzeigen und suchen. Die Hörzahlen sind vorerst Dummy-Werte (`js/plays.js`); sobald die Spotify-Streaminghistorie vorliegt, ersetzt sie nur `playCount()`.
+Optional liest die App den **erweiterten Streamingverlauf** von Spotify ein (spotify.com → Konto → Datenschutz → Kontodaten herunterladen → „Erweiterter Streamingverlauf“; die ZIP-Datei oder die `Streaming_History_Audio_*.json` einfach zusammen mit den Playlists hochladen). Daraus zeigt sie pro Titel, wie oft er gehört wurde, und „Mindestens so oft gehört“ blendet seltene Titel aus. Als Wiedergabe zählt, was Spotify auch zählt: mindestens 30 Sekunden gespielt oder bis zum Ende durchgelaufen. Der Verlauf wird nur im Browser verarbeitet (und in IndexedDB gemerkt), nichts wird hochgeladen. Ohne Verlauf gibt es keine Hörzahlen.
 
 ## Entwicklung
 
@@ -27,7 +27,7 @@ npm run check:ui        # App im Headless-Browser durchklicken, Screenshots in s
 - `js/store.js` – IndexedDB-Speicher für Cache und Sitzung (Fallback: flüchtig)
 - `js/zip.js`, `js/playlists.js` – Exportify-ZIP lesen, Playlists zusammenführen
 - `js/matcher.js` – Titel finden (Album-Titel gebündelt über eine Album-Abfrage), Anfragen schätzen, günstigsten Einkauf berechnen
-- `js/plays.js` – Hörzahlen pro Titel (Dummy) und Filter „mindestens x-mal gehört“
+- `js/plays.js` – Streamingverlauf einlesen, Hörzahlen pro Titel (über Spotify-URI, sonst Künstler und Titel) und Filter „mindestens x-mal gehört“
 - `js/artistsite.js` – offizielle Künstler-Website über MusicBrainz (nur Alben mit einem Künstler, 30 Tage Cache)
 - `js/app.js` – Oberfläche
 - `samples/beispiel-playlist.csv` – 5 Einzeltitel + komplettes Album „Thriller“ (Metadaten und ISRCs von Deezer, Spotify-URIs sind Platzhalter)

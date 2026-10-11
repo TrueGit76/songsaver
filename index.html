@@ -39,14 +39,20 @@
           <strong>„Export All“</strong> bzw. <strong>„Alles exportieren“</strong>, um alle Playlists auf einmal als ZIP-Datei zu laden.
         </li>
         <li>Die heruntergeladene <strong>.csv</strong>- oder <strong>.zip</strong>-Datei hier hochladen. Sie bleibt in deinem Browser.</li>
+        <li>
+          <em>Optional:</em> Auf spotify.com unter <strong>Konto → Datenschutz → Kontodaten herunterladen</strong> den
+          <strong>„Erweiterten Streamingverlauf“</strong> anfordern (kommt per E-Mail, dauert bis zu 30 Tage) und die ZIP-Datei
+          ebenfalls hier hochladen. Dann zeigt Songsaver, wie oft du jeden Titel gehört hast.
+        </li>
       </ol>
       <label class="dropzone" id="dropzone">
         <input type="file" id="file" accept=".csv,.zip,text/csv,application/zip" multiple>
-        <span class="dropzone-text"><strong>Dateien auswählen</strong> oder hierher ziehen<span class="sub">CSV oder ZIP von Exportify, auch mehrere</span></span>
+        <span class="dropzone-text"><strong>Dateien auswählen</strong> oder hierher ziehen<span class="sub">CSV oder ZIP von Exportify und der Streamingverlauf von Spotify (ZIP), auch mehrere</span></span>
       </label>
       <div class="row">
         <button type="button" class="link-button" id="sample">Beispiel-Playlist verwenden</button>
       </div>
+      <p class="hint history-info" id="history-info" aria-live="polite"></p>
       <p class="error" id="import-error" hidden></p>
 
       <div class="picker" id="picker" hidden>
@@ -67,12 +73,13 @@
     <section class="card" id="search" hidden>
       <h2>2. Preise suchen</h2>
       <p id="playlist-summary"></p>
-      <div class="row">
+      <div class="row" id="plays-row" hidden>
         <label class="field">
           <span>Mindestens so oft gehört</span>
           <input type="number" id="min-plays" min="1" step="1" value="1" inputmode="numeric">
         </label>
         <p class="hint" id="plays-info" aria-live="polite"></p>
+        <button type="button" class="link-button" id="history-clear" hidden>Streamingverlauf entfernen</button>
       </div>
       <p class="estimate" id="estimate" aria-live="polite"></p>
       <div class="row">
