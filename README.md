@@ -8,6 +8,8 @@ Vor der Suche zeigt die App eine Zeitschätzung für die aktuelle Auswahl. Gesuc
 
 Optional liest die App den **erweiterten Streamingverlauf** von Spotify ein (spotify.com → Konto → Datenschutz → Kontodaten herunterladen → „Erweiterter Streamingverlauf“; die ZIP-Datei oder die `Streaming_History_Audio_*.json` einfach zusammen mit den Playlists hochladen). Daraus zeigt sie pro Titel, wie oft er gehört wurde, und „Mindestens so oft gehört“ blendet seltene Titel aus. Als Wiedergabe zählt, was Spotify auch zählt: mindestens 30 Sekunden gespielt oder bis zum Ende durchgelaufen. Der Verlauf wird nur im Browser verarbeitet (und in IndexedDB gemerkt), nichts wird hochgeladen. Ohne Verlauf gibt es keine Hörzahlen.
 
+Zusätzlich sucht die App auf Knopfdruck bei **Qobuz** (günstigste Qualitätsstufe pro Titel). Qobuz erlaubt keine Abfragen aus dem Browser, deshalb läuft das über einen Proxy im lokalen Server und geht nur mit `npm start`. Der Warenkorb lässt sich per Lesezeichen füllen: Die App öffnet qobuz.com mit den Artikeln im URL-Teil nach `#`, das Lesezeichen legt sie mit der eigenen Sitzung hinein (derzeit nur die ersten 5 Titel, zum Testen).
+
 ## Entwicklung
 
 ```sh
@@ -29,6 +31,8 @@ npm run check:ui        # App im Headless-Browser durchklicken, Screenshots in s
 - `js/matcher.js` – Titel finden (Album-Titel gebündelt über eine Album-Abfrage), Anfragen schätzen, günstigsten Einkauf berechnen
 - `js/plays.js` – Streamingverlauf einlesen, Hörzahlen pro Titel (über Spotify-URI, sonst Künstler und Titel) und Filter „mindestens x-mal gehört“
 - `js/artistsite.js` – offizielle Künstler-Website über MusicBrainz (nur Alben mit einem Künstler, 30 Tage Cache)
+- `js/qobuz.js` – Qobuz-Titelsuche und günstigste Stufe (HTML der Suchseite und des Warenkorb-Dialogs)
+- `js/qobuzcart.js` – Warenkorb-Lesezeichen und die Adresse, die die Artikel dorthin trägt
 - `js/app.js` – Oberfläche
 - `samples/beispiel-playlist.csv` – 5 Einzeltitel + komplettes Album „Thriller“ (Metadaten und ISRCs von Deezer, Spotify-URIs sind Platzhalter)
 

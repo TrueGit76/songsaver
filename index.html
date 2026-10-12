@@ -130,6 +130,16 @@
         <p class="hint" id="purchase-note" hidden>Die Suche ist noch nicht abgeschlossen – die Summen sind vorläufig.</p>
         <div class="stats" id="stats"></div>
         <div class="stats" id="qobuz-stats"></div>
+        <div class="qobuz-cart" id="qobuz-cart" hidden>
+          <h3>Qobuz-Warenkorb (Test)</h3>
+          <ol class="hint">
+            <li>Einmalig: Ziehe diesen Button in deine Lesezeichenleiste (nicht anklicken): <a id="bookmarklet" class="bookmarklet" href="#">Songsaver → Qobuz-Warenkorb</a></li>
+            <li>Bei Qobuz einloggen, dann unten auf „Bei Qobuz öffnen“ klicken.</li>
+            <li>Auf der geöffneten Qobuz-Seite das Lesezeichen anklicken. Danach den Warenkorb prüfen und selbst bezahlen.</li>
+          </ol>
+          <p class="hint" id="qobuz-cart-list"></p>
+          <button type="button" id="qobuz-cart-open">Bei Qobuz öffnen</button>
+        </div>
         <label class="field sub-price">
           <span>Spotify-Abo pro Monat (für den Vergleich)</span>
           <input type="number" id="sub-price" min="0.01" step="0.01" inputmode="decimal">

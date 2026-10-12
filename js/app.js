@@ -2,6 +2,7 @@ import { loadPlaylistFiles, mergePlaylists } from './playlists.js';
 import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
 import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam, hasPrice } from './matcher.js';
 import { QobuzClient, matchQobuz, QOBUZ_INTERVAL_MS } from './qobuz.js';
+import { cartUrl, bookmarkletHref, CART_TEST_LIMIT } from './qobuzcart.js';
 import { openStore, memoryStore } from './store.js';
 import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
 import { plainAlbumTitle } from './text.js';
@@ -714,6 +715,7 @@ function renderResults() {
   const plan = buildPurchasePlan(results, state.owned);
   renderTrackRows(plan);
   renderQobuzStat();
+  renderQobuzCart();
   $('purchase').hidden = !results.length && !qobuzFound().length;
   if (!results.length) return;
 
@@ -837,6 +839,16 @@ function renderQobuzStat() {
     stat('Bei Qobuz (günstigste Stufe)', money(found.reduce((s, r) => s + r.match.price, 0), found[0]?.match.currency)),
     stat('Bei Qobuz gefunden', `${found.length} / ${searched}`),
   ] : []));
+}
+
+/** Qobuz-Warenkorb-Test: die ersten Treffer (siehe CART_TEST_LIMIT) über das Lesezeichen in den Warenkorb legen. */
+function renderQobuzCart() {
+  const found = visibleTracks().filter(t => !state.owned.has(t.id)).map(t => state.qobuz.get(t.id)).filter(r => r?.match);
+  const chosen = found.slice(0, CART_TEST_LIMIT);
+  $('qobuz-cart').hidden = !chosen.length;
+  $('qobuz-cart-list').textContent = `${chosen.length} von ${found.length} Titeln, nur zum Testen: ` +
+    chosen.map(r => `${r.match.artistName} – ${r.match.trackName}`).join('; ');
+  $('qobuz-cart-open').onclick = () => window.open(cartUrl(QOBUZ_LOCALE[state.country], chosen.map(r => r.match)), '_blank', 'noopener');
 }
 
 function stat(label, value, highlight) {
@@ -1005,6 +1017,8 @@ async function init() {
   const savedSub = Number(local(SUB_PRICE_KEY));
   if (savedSub > 0) state.subPrice = savedSub;
 
+  $('bookmarklet').href = bookmarkletHref();
+  $('bookmarklet').addEventListener('click', e => { e.preventDefault(); alert('Ziehe den Button in deine Lesezeichenleiste, statt ihn anzuklicken.'); });
   setupImport();
   setupSearch();
   state.store = await openStore();

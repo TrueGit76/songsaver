@@ -19,7 +19,7 @@ test('Suchseite: Titel, Künstler, Album, ID und Albumlink', () => {
 
 test('Warenkorb-Dialog: Qualitätsstufen mit Preis', () => {
   assert.deepEqual(parseQualities(fixture('qobuz-popin.html')),
-    [{ articleId: '80822413', label: 'CD-Qualität', price: 2.29, currency: 'EUR' }]);
+    [{ articleId: '80822413', cartLink: '/v4/ajax/add-cart?articleId=80822413&type=album', label: 'CD-Qualität', price: 2.29, currency: 'EUR' }]);
   assert.deepEqual(parseQualities('<p>nichts</p>'), []);
 });
 
@@ -69,4 +69,12 @@ test('Suchseite: HTML-Entities im Titel werden aufgelöst', () => {
   const html = '<li><a href="/de-de/album/x/1" title="t" role="tooltip">Startin&#039; Somethin&#x27; &amp; Co</a><p class="a">A • B</p>'
     + '<button data-url="&#x2F;v4&#x2F;ajax&#x2F;popin-add-cart&#x2F;track&#x2F;7"></button></li>';
   assert.equal(parseTrackSearch(html)[0].trackName, "Startin' Somethin' & Co");
+});
+
+test('Warenkorb-Adresse: Artikel im URL-Teil, doppelte nur einmal, Typ aus dem Qobuz-Aufruf', async () => {
+  const { cartUrl, cartItem } = await import('../js/qobuzcart.js');
+  const a = { articleId: '1', cartLink: '/v4/ajax/add-cart?articleId=1&type=track' };
+  assert.equal(cartItem(a), '1:track');
+  assert.equal(cartItem({ articleId: '2' }), '2:album', 'ältere Cache-Einträge ohne Aufruf');
+  assert.equal(cartUrl('de-de', [a, a, { articleId: '2' }]), 'https://www.qobuz.com/de-de/#songsaver=1:track,2:album');
 });

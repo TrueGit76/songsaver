@@ -43,14 +43,14 @@ function parsePrice(text) {
   return value > 0 ? { price: value, currency } : null;
 }
 
-/** Qualitätsstufen aus dem „In den Warenkorb“-Dialog eines Titels: [{ articleId, label, price, currency }]. */
+/** Qualitätsstufen aus dem „In den Warenkorb“-Dialog eines Titels: [{ articleId, cartLink, label, price, currency }]. */
 export function parseQualities(html) {
   const out = [];
   for (const [tag] of html.matchAll(/<button\b[^>]*store-modal__quality[^>]*>/g)) {
     const attr = name => tag.match(new RegExp(`${name}\\s*=\\s*"([^"]*)"`))?.[1];
     const price = parsePrice(clean(attr('data-price') ?? ''));
     if (!attr('data-id') || !price) continue;
-    out.push({ articleId: attr('data-id'), label: clean(attr('data-label') ?? ''), ...price });
+    out.push({ articleId: attr('data-id'), cartLink: clean(attr('data-cart-link') ?? ''), label: clean(attr('data-label') ?? ''), ...price });
   }
   return out;
 }
