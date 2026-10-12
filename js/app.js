@@ -3,6 +3,8 @@ import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
 import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam, hasPrice } from './matcher.js';
 import { QobuzClient, matchQobuz, QOBUZ_INTERVAL_MS } from './qobuz.js';
 import { cartUrl, cartBlocks, bookmarkletHref } from './qobuzcart.js';
+import { entriesFromPaths, entriesFromSongs, buildIndex, findOwned } from './library.js';
+import { NextcloudMusicClient } from './nextcloud.js';
 import { openStore, memoryStore } from './store.js';
 import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
 import { plainAlbumTitle } from './text.js';
@@ -15,6 +17,8 @@ const NOTIFY_KEY = 'songsaver:notify';
 const MIN_PLAYS_KEY = 'songsaver:minPlays';
 const CACHE_DAYS_KEY = 'songsaver:cacheDays';
 const SUB_PRICE_KEY = 'songsaver:subPrice';
+const NC_URL_KEY = 'songsaver:ncUrl';
+const NC_USER_KEY = 'songsaver:ncUser';
 const APP_TITLE = document.title;
 
 const AMAZON_DOMAIN = { de: 'amazon.de', at: 'amazon.de', ch: 'amazon.de', gb: 'amazon.co.uk', us: 'amazon.com' };
@@ -38,6 +42,8 @@ const state = {
   owned: loadOwned(),
   ownedAlbums: loadOwnedAlbums(), // Albumschlüssel -> { key, title, artist, artwork, covers } (als vorhanden markiert)
   running: null,       // AbortController der laufenden Suche
+  library: null,       // { source, at, entries } – Titel der vorhandenen Musikbibliothek
+  libraryIndex: null,
   runningKind: null,   // 'itunes' oder 'qobuz'
   store: memoryStore(),
 };
@@ -294,6 +300,108 @@ function updateQobuzButton() {
     : '';
 }
 
+// ---------- Musikbibliothek (schon gekauft) ----------
+
+function renderLibraryInfo() {
+  const lib = state.library;
+  $('library-apply').hidden = !lib;
+  $('library-clear').hidden = !lib;
+  $('library-info').textContent = lib
+    ? `Bibliothek geladen (${lib.source}): ${lib.entries.length.toLocaleString('de-DE')} Titel, Stand ${new Date(lib.at).toLocaleDateString('de-DE')}.`
+    : '';
+}
+
+function showLibraryError(message) {
+  $('library-error').textContent = message ?? '';
+  $('library-error').hidden = !message;
+}
+
+async function setLibrary(source, entries) {
+  state.library = { source, at: Date.now(), entries };
+  state.libraryIndex = buildIndex(entries);
+  try { await state.store.set('session', 'library', state.library); } catch { /* nur Komfort */ }
+  renderLibraryInfo();
+  applyLibrary();
+}
+
+/** Hakt alle Titel der Auswahl ab, die in der Bibliothek vorhanden sind („Habe ich“). */
+function applyLibrary() {
+  if (!state.library || !state.tracks.length) return;
+  state.libraryIndex ??= buildIndex(state.library.entries);
+  const matched = findOwned(state.tracks, state.libraryIndex);
+  let added = 0;
+  for (const id of matched) if (!state.owned.has(id)) { state.owned.add(id); added++; }
+  saveOwned();
+  renderResults();
+  updateEstimate();
+  $('library-info').textContent = `Bibliothek (${state.library.source}, ${state.library.entries.length.toLocaleString('de-DE')} Titel): ` +
+    `${matched.size} von ${state.tracks.length} Titeln der Auswahl sind vorhanden${added ? `, ${added} neu abgehakt` : ''}.`;
+}
+
+async function restoreLibrary() {
+  try {
+    const saved = await state.store.get('session', 'library');
+    if (saved?.entries?.length) {
+      state.library = saved;
+      renderLibraryInfo();
+    }
+  } catch { /* ohne gespeicherte Bibliothek weiter */ }
+}
+
+function setupLibrary() {
+  $('nc-url').value = local(NC_URL_KEY) ?? '';
+  $('nc-user').value = local(NC_USER_KEY) ?? '';
+
+  $('library-dir-pick').addEventListener('click', () => $('library-dir').click());
+  $('library-dir').addEventListener('change', async e => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    showLibraryError(null);
+    const entries = entriesFromPaths(files.map(f => f.webkitRelativePath || f.name));
+    if (!entries.length) {
+      showLibraryError('In diesem Ordner wurden keine Musikdateien gefunden.');
+      return;
+    }
+    await setLibrary('Ordner', entries);
+  });
+
+  $('nc-load').addEventListener('click', async () => {
+    showLibraryError(null);
+    const button = $('nc-load');
+    const url = $('nc-url').value;
+    const user = $('nc-user').value;
+    if (!url.trim() || !user.trim() || !$('nc-key').value) {
+      showLibraryError('Bitte Adresse, Benutzer und API-Schlüssel eintragen.');
+      return;
+    }
+    local(NC_URL_KEY, url.trim());
+    local(NC_USER_KEY, user.trim());
+    button.disabled = true;
+    try {
+      const client = new NextcloudMusicClient({ baseUrl: url, user, key: $('nc-key').value });
+      await client.ping();
+      const songs = await client.allSongs({
+        onProgress: (done, total) => { $('library-info').textContent = `Lade Alben aus Nextcloud … ${done} von ${total}`; },
+      });
+      if (!songs.length) throw new Error('Die Sammlung in Nextcloud Music ist leer (oder noch nicht gescannt).');
+      await setLibrary('Nextcloud', entriesFromSongs(songs));
+    } catch (err) {
+      showLibraryError(err.message);
+      renderLibraryInfo();
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('library-apply').addEventListener('click', applyLibrary);
+  $('library-clear').addEventListener('click', async () => {
+    state.library = null;
+    state.libraryIndex = null;
+    try { await state.store.delete('session', 'library'); } catch { /* s. o. */ }
+    renderLibraryInfo();
+  });
+}
+
 // ---------- Import ----------
 
 function showTracks(tracks, summary) {
@@ -322,6 +430,7 @@ function applyPlaylists(playlists) {
   $('progress').hidden = true;
   showError('search-error', null);
   showTracks(tracks, summary);
+  applyLibrary();
   saveTracks();
   saveResults(true);
   $('start').focus();
@@ -1038,8 +1147,10 @@ async function init() {
   $('bookmarklet').addEventListener('click', e => { e.preventDefault(); alert('Ziehe den Button in deine Lesezeichenleiste, statt ihn anzuklicken.'); });
   setupImport();
   setupSearch();
+  setupLibrary();
   state.store = await openStore();
   await restoreHistory();
+  await restoreLibrary();
   await restoreSession();
   renderCacheInfo();
   if (state.cacheDays > 7) requestPersistentStorage();

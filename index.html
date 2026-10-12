@@ -73,6 +73,25 @@
     <section class="card" id="search" hidden>
       <h2>2. Preise suchen</h2>
       <p id="playlist-summary"></p>
+      <details class="library" id="library">
+        <summary>Schon gekaufte Titel aus deiner Musikbibliothek ausschließen</summary>
+        <p class="hint">Die App vergleicht Titel und Künstler und hakt Treffer bei „Habe ich“ ab. Sie werden dann nicht gesucht und nicht eingerechnet. Von deiner Musik wird nichts hochgeladen: bei einem Ordner liest die App nur die Dateinamen, bei Nextcloud nur die Titelliste.</p>
+        <div class="row">
+          <input type="file" id="library-dir" webkitdirectory multiple hidden>
+          <button type="button" id="library-dir-pick">Lokalen Ordner wählen</button>
+          <span class="sub">Erkennt „Künstler/Album/03 Titel.mp3“ und „Künstler - Titel.mp3“.</span>
+        </div>
+        <div class="row nextcloud-row">
+          <label class="field"><span>Nextcloud-Adresse</span><input type="text" id="nc-url" placeholder="https://cloud.beispiel.de" autocomplete="url"></label>
+          <label class="field"><span>Benutzer</span><input type="text" id="nc-user" autocomplete="username"></label>
+          <label class="field"><span>API-Schlüssel</span><input type="password" id="nc-key" autocomplete="off"></label>
+          <button type="button" id="nc-load">Aus Nextcloud Music laden</button>
+        </div>
+        <p class="hint">Den API-Schlüssel erzeugst du in Nextcloud in der Music-App: Einstellungen (Link unten links), Abschnitt „Ampache and Subsonic“, „Create API key“. Er wird nicht gespeichert und gilt nur für die Music-App, nicht für dein Konto.</p>
+        <p class="hint" id="library-info" aria-live="polite"></p>
+        <p class="error" id="library-error" hidden></p>
+        <div class="row"><button type="button" id="library-apply" hidden>Neu abgleichen</button> <button type="button" class="link-button" id="library-clear" hidden>Bibliothek vergessen</button></div>
+      </details>
       <div class="row" id="plays-row" hidden>
         <label class="field">
           <span>Mindestens so oft gehört</span>
