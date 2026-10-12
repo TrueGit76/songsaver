@@ -78,3 +78,10 @@ test('Warenkorb-Adresse: Artikel im URL-Teil, doppelte nur einmal, Typ aus dem Q
   assert.equal(cartItem({ articleId: '2' }), '2:album', 'ältere Cache-Einträge ohne Aufruf');
   assert.equal(cartUrl('de-de', [a, a, { articleId: '2' }]), 'https://www.qobuz.com/de-de/#songsaver=1:track,2:album');
 });
+
+test('Blöcke: 20 pro Block, Rest im letzten', async () => {
+  const { cartBlocks } = await import('../js/qobuzcart.js');
+  const blocks = cartBlocks(Array.from({ length: 45 }, (_, i) => i));
+  assert.deepEqual(blocks.map(b => b.length), [20, 20, 5]);
+  assert.deepEqual(cartBlocks([]), []);
+});

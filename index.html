@@ -131,14 +131,24 @@
         <div class="stats" id="stats"></div>
         <div class="stats" id="qobuz-stats"></div>
         <div class="qobuz-cart" id="qobuz-cart" hidden>
-          <h3>Qobuz-Warenkorb (Test)</h3>
-          <ol class="hint">
-            <li>Einmalig: Ziehe diesen Button in deine Lesezeichenleiste (nicht anklicken): <a id="bookmarklet" class="bookmarklet" href="#">Songsaver → Qobuz-Warenkorb</a></li>
-            <li>Bei Qobuz einloggen, dann unten auf „Bei Qobuz öffnen“ klicken.</li>
-            <li>Auf der geöffneten Qobuz-Seite das Lesezeichen anklicken. Danach den Warenkorb prüfen und selbst bezahlen.</li>
+          <h3>Bei Qobuz kaufen: Warenkorb füllen</h3>
+          <p class="hint">Die App kann nicht selbst für dich bezahlen. Sie legt die gefundenen Titel aber in deinen Qobuz-Warenkorb, in Blöcken zu 20 Titeln. Bezahlen und Herunterladen machst du bei Qobuz.</p>
+          <ol class="steps">
+            <li><strong>Konto bei Qobuz</strong> (einmalig). Hast du noch keins, lege es auf <a href="https://www.qobuz.com/signin" target="_blank" rel="noopener">qobuz.com/signin</a> an („Melden Sie sich hier an“; E-Mail oder Google, Apple, Facebook). Logge dich dort ein und setze das Häkchen bei „Eingeloggt bleiben“. Zahlungsdaten brauchst du erst beim Bezahlen.</li>
+            <li><strong>Lesezeichen anlegen</strong> (einmalig). Ziehe diesen Button mit der Maus in deine Lesezeichenleiste: <a id="bookmarklet" class="bookmarklet" href="#">Songsaver → Qobuz-Warenkorb</a><br>
+              <span class="sub">Nicht anklicken, nur ziehen. Ist die Lesezeichenleiste nicht sichtbar, blende sie mit Strg + Umschalt + B ein.</span></li>
+            <li><strong>Block öffnen.</strong> Wähle einen Block und klicke auf „Bei Qobuz öffnen“. Qobuz öffnet sich in einem neuen Tab.</li>
+            <li><strong>Lesezeichen anklicken.</strong> Klicke in diesem Qobuz-Tab (in dem du eingeloggt sein musst) auf dein Lesezeichen „Songsaver → Qobuz-Warenkorb“. Nach etwa 15 Sekunden erscheint ein Fenster mit „… Artikeln in den Warenkorb gelegt“. Mit „OK“ landest du direkt im Warenkorb.</li>
+            <li><strong>Prüfen und bezahlen.</strong> Kontrolliere im Warenkorb die Titel und Preise und bezahle. Für den nächsten Block wiederholst du Schritt 3 und 4. Öffne jeden Block nur einmal.</li>
           </ol>
+          <div class="row">
+            <label class="field">
+              <span>Block</span>
+              <select id="qobuz-block"></select>
+            </label>
+            <button type="button" class="primary" id="qobuz-cart-open">Bei Qobuz öffnen</button>
+          </div>
           <p class="hint" id="qobuz-cart-list"></p>
-          <button type="button" id="qobuz-cart-open">Bei Qobuz öffnen</button>
         </div>
         <label class="field sub-price">
           <span>Spotify-Abo pro Monat (für den Vergleich)</span>

@@ -287,3 +287,5 @@ tr.group .count { color: var(--muted); font-weight: 400; }
 .qobuz-cart h3 { margin-top: 0; }
 .qobuz-cart ol { padding-left: 20px; }
 .bookmarklet { display: inline-block; padding: 4px 12px; border-radius: 999px; background: var(--good-soft); color: var(--good); font-weight: 700; cursor: grab; }
+.qobuz-cart .steps { padding-left: 20px; line-height: 1.5; }
+.qobuz-cart .steps li { margin-bottom: 8px; }

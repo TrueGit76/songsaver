@@ -8,7 +8,7 @@ Vor der Suche zeigt die App eine Zeitschätzung für die aktuelle Auswahl. Gesuc
 
 Optional liest die App den **erweiterten Streamingverlauf** von Spotify ein (spotify.com → Konto → Datenschutz → Kontodaten herunterladen → „Erweiterter Streamingverlauf“; die ZIP-Datei oder die `Streaming_History_Audio_*.json` einfach zusammen mit den Playlists hochladen). Daraus zeigt sie pro Titel, wie oft er gehört wurde, und „Mindestens so oft gehört“ blendet seltene Titel aus. Als Wiedergabe zählt, was Spotify auch zählt: mindestens 30 Sekunden gespielt oder bis zum Ende durchgelaufen. Der Verlauf wird nur im Browser verarbeitet (und in IndexedDB gemerkt), nichts wird hochgeladen. Ohne Verlauf gibt es keine Hörzahlen.
 
-Zusätzlich sucht die App auf Knopfdruck bei **Qobuz** (günstigste Qualitätsstufe pro Titel). Qobuz erlaubt keine Abfragen aus dem Browser, deshalb läuft das über einen Proxy im lokalen Server und geht nur mit `npm start`. Der Warenkorb lässt sich per Lesezeichen füllen: Die App öffnet qobuz.com mit den Artikeln im URL-Teil nach `#`, das Lesezeichen legt sie mit der eigenen Sitzung hinein (derzeit nur die ersten 5 Titel, zum Testen).
+Zusätzlich sucht die App auf Knopfdruck bei **Qobuz** (günstigste Qualitätsstufe pro Titel). Qobuz erlaubt keine Abfragen aus dem Browser, deshalb läuft das über einen Proxy im lokalen Server und geht nur mit `npm start`. Der Warenkorb lässt sich per Lesezeichen füllen: Die App öffnet qobuz.com mit den Artikeln im URL-Teil nach `#`, das Lesezeichen legt sie mit der eigenen Sitzung hinein (in Blöcken zu 20 Titeln).
 
 ## Entwicklung
 

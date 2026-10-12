@@ -5,8 +5,15 @@
 import { QOBUZ_HOST } from './qobuz.js';
 
 const HASH_KEY = 'songsaver';
-/** Vorerst nur wenige Titel pro Durchgang, bis geprüft ist, was Qobuz im Warenkorb daraus macht. */
-export const CART_TEST_LIMIT = 5;
+/** Titel pro Durchgang: hält die Adresse kurz, und das Lesezeichen braucht dafür nur etwa 15 Sekunden. */
+export const CART_BLOCK_SIZE = 20;
+
+/** Teilt die Liste in Blöcke zu je `size` Einträgen. */
+export function cartBlocks(items, size = CART_BLOCK_SIZE) {
+  const blocks = [];
+  for (let i = 0; i < items.length; i += size) blocks.push(items.slice(i, i + size));
+  return blocks;
+}
 
 /** „Artikel-ID:Typ“ für den Warenkorb-Aufruf, den Qobuz für diese Stufe selbst verwendet. */
 export function cartItem(match) {

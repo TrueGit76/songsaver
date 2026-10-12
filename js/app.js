@@ -2,7 +2,7 @@ import { loadPlaylistFiles, mergePlaylists } from './playlists.js';
 import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
 import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam, hasPrice } from './matcher.js';
 import { QobuzClient, matchQobuz, QOBUZ_INTERVAL_MS } from './qobuz.js';
-import { cartUrl, bookmarkletHref, CART_TEST_LIMIT } from './qobuzcart.js';
+import { cartUrl, cartBlocks, bookmarkletHref } from './qobuzcart.js';
 import { openStore, memoryStore } from './store.js';
 import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
 import { plainAlbumTitle } from './text.js';
@@ -841,14 +841,31 @@ function renderQobuzStat() {
   ] : []));
 }
 
-/** Qobuz-Warenkorb-Test: die ersten Treffer (siehe CART_TEST_LIMIT) über das Lesezeichen in den Warenkorb legen. */
+/** Qobuz-Warenkorb: gefundene Titel in Blöcken zu je 20, die man nacheinander über das Lesezeichen einlegt. */
 function renderQobuzCart() {
   const found = visibleTracks().filter(t => !state.owned.has(t.id)).map(t => state.qobuz.get(t.id)).filter(r => r?.match);
-  const chosen = found.slice(0, CART_TEST_LIMIT);
-  $('qobuz-cart').hidden = !chosen.length;
-  $('qobuz-cart-list').textContent = `${chosen.length} von ${found.length} Titeln, nur zum Testen: ` +
-    chosen.map(r => `${r.match.artistName} – ${r.match.trackName}`).join('; ');
-  $('qobuz-cart-open').onclick = () => window.open(cartUrl(QOBUZ_LOCALE[state.country], chosen.map(r => r.match)), '_blank', 'noopener');
+  const blocks = cartBlocks(found);
+  $('qobuz-cart').hidden = !blocks.length;
+  const select = $('qobuz-block');
+  const previous = Math.min(Number(select.value) || 0, Math.max(0, blocks.length - 1));
+  let first = 1;
+  select.replaceChildren(...blocks.map((block, i) => {
+    const label = `Block ${i + 1} von ${blocks.length}: Titel ${first}–${first + block.length - 1}`;
+    first += block.length;
+    return el('option', { value: String(i), selected: i === previous }, label);
+  }));
+  const showBlock = () => {
+    const block = blocks[Number(select.value)] ?? [];
+    $('qobuz-cart-list').textContent = block.map(r => `${r.match.artistName} – ${r.match.trackName}`).join('; ');
+  };
+  select.onchange = showBlock;
+  showBlock();
+  $('qobuz-cart-open').onclick = () => {
+    const index = Number(select.value);
+    window.open(cartUrl(QOBUZ_LOCALE[state.country], blocks[index].map(r => r.match)), '_blank', 'noopener');
+    // Nach dem Öffnen steht schon der nächste Block bereit.
+    if (index + 1 < blocks.length) { select.value = String(index + 1); showBlock(); }
+  };
 }
 
 function stat(label, value, highlight) {
