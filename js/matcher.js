@@ -87,7 +87,7 @@ export function songTerm(track) {
 }
 
 /** Zweiter Suchbegriff ohne jeden Klammerzusatz, z. B. "(Radio Edit)" oder "- Live"; null, wenn identisch. */
-function bareSongTerm(track) {
+export function bareSongTerm(track) {
   const bare = track.name.replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '').trim();
   return bare && bare !== cleanTitle(track.name) ? `${track.artists[0] ?? ''} ${bare}`.trim() : null;
 }

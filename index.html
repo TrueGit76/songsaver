@@ -95,6 +95,10 @@
         </label>
         <button type="button" class="primary" id="start">Preise suchen</button>
       </div>
+      <div class="row">
+        <button type="button" id="qobuz-start">Bei Qobuz suchen</button>
+        <p class="hint" id="qobuz-info" aria-live="polite"></p>
+      </div>
       <label class="check">
         <input type="checkbox" id="notify">
         Benachrichtigen, wenn die Suche fertig ist (Tab muss offen bleiben)
@@ -125,6 +129,7 @@
       <div id="purchase" hidden>
         <p class="hint" id="purchase-note" hidden>Die Suche ist noch nicht abgeschlossen – die Summen sind vorläufig.</p>
         <div class="stats" id="stats"></div>
+        <div class="stats" id="qobuz-stats"></div>
         <label class="field sub-price">
           <span>Spotify-Abo pro Monat (für den Vergleich)</span>
           <input type="number" id="sub-price" min="0.01" step="0.01" inputmode="decimal">
@@ -146,6 +151,7 @@
               <th scope="col" class="col-num">Gehört</th>
               <th scope="col">Gefunden bei iTunes</th>
               <th scope="col" class="col-buy">Kaufen</th>
+              <th scope="col" class="col-buy">Bei Qobuz</th>
               <th scope="col">Weitere Links</th>
             </tr>
           </thead>
@@ -157,7 +163,7 @@
 
   <footer class="wrap site-footer">
     Preise: Apple iTunes Store, live abgefragt – ohne Gewähr. Gekaufte iTunes-Titel sind DRM-freie AAC-Dateien (256 kbit/s).
-    Bandcamp, Amazon und Qobuz sind vorerst nur verlinkt, YouTube zum Reinhören. Künstler-Websites: MusicBrainz.
+    Qobuz-Preise (günstigste Qualitätsstufe) werden über den lokalen Server abgefragt. Bandcamp und Amazon sind vorerst nur verlinkt, YouTube zum Reinhören. Künstler-Websites: MusicBrainz.
   </footer>
 </body>
 </html>

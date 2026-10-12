@@ -1,6 +1,7 @@
 import { loadPlaylistFiles, mergePlaylists } from './playlists.js';
 import { ItunesClient, MIN_INTERVAL_MS } from './itunes.js';
 import { matchPlaylist, estimateRequests, buildPurchasePlan, withStoreParam, hasPrice } from './matcher.js';
+import { QobuzClient, matchQobuz, QOBUZ_INTERVAL_MS } from './qobuz.js';
 import { openStore, memoryStore } from './store.js';
 import { ArtistSiteClient, isSingleArtist } from './artistsite.js';
 import { plainAlbumTitle } from './text.js';
@@ -27,6 +28,7 @@ const state = {
   summary: '',
   playlists: [],       // Kandidaten in der Playlist-Auswahl
   results: new Map(),  // Track-ID -> Suchergebnis (für state.country)
+  qobuz: new Map(),    // Track-ID -> Qobuz-Ergebnis (für state.country)
   artistSites: new Map(), // Künstlername (klein) -> { website, bandcamp } (Felder null, wenn nicht gefunden)
   country: 'de',
   subPrice: null,      // eigener Abo-Preis; null = Richtwert für das Store-Land
@@ -35,6 +37,7 @@ const state = {
   owned: loadOwned(),
   ownedAlbums: loadOwnedAlbums(), // Albumschlüssel -> { key, title, artist, artwork, covers } (als vorhanden markiert)
   running: null,       // AbortController der laufenden Suche
+  runningKind: null,   // 'itunes' oder 'qobuz'
   store: memoryStore(),
 };
 
@@ -207,6 +210,10 @@ function saveResults(now = false) {
   return null;
 }
 
+function saveQobuz() {
+  state.store.set('session', 'qobuz', { country: state.country, results: [...state.qobuz.values()] }).catch(() => {});
+}
+
 async function restoreHistory() {
   try {
     const saved = await state.store.get('session', 'history');
@@ -222,6 +229,10 @@ async function restoreSession() {
     const res = await state.store.get('session', 'results');
     if (res?.country === state.country) {
       for (const r of res.results) state.results.set(r.track.id, r);
+    }
+    const qobuz = await state.store.get('session', 'qobuz');
+    if (qobuz?.country === state.country) {
+      for (const r of qobuz.results) state.qobuz.set(r.track.id, r);
     }
     showTracks(saved.tracks, saved.summary);
     const done = saved.tracks.filter(t => state.results.has(t.id)).length;
@@ -251,6 +262,7 @@ async function updateEstimate() {
   button.disabled = !pending.length;
   button.title = pending.length ? '' : 'Nichts mehr zu suchen. Ändere die Hörzahl oder die Playlists, um weitere Titel zu suchen.';
 
+  updateQobuzButton();
   if (!pending.length) {
     $('estimate').textContent = !state.tracks.length ? ''
       : visibleTracks().length ? 'Alle Titel sind gesucht.' : 'Kein Titel erreicht diese Hörzahl.';
@@ -262,6 +274,23 @@ async function updateEstimate() {
   $('estimate').textContent = requests
     ? `${pending.length} Titel zu suchen – Dauer ${duration(requests * MIN_INTERVAL_MS)} (${requests} ${requests === 1 ? 'Anfrage' : 'Anfragen'} an iTunes).`
     : `${pending.length} Titel zu suchen – alles zwischengespeichert, dauert nur Sekunden.`;
+}
+
+function qobuzPending(tracks = state.tracks) {
+  return visibleTracks(tracks).filter(t => !state.owned.has(t.id) && !state.qobuz.has(t.id));
+}
+
+function updateQobuzButton() {
+  if (state.running) return;
+  const pending = qobuzPending();
+  const button = $('qobuz-start');
+  button.textContent = state.qobuz.size && !pending.length ? 'Qobuz: alles gesucht ✓'
+    : state.qobuz.size ? 'Bei Qobuz weitersuchen' : 'Bei Qobuz suchen';
+  button.disabled = !pending.length;
+  // Pro Titel eine Suche und eine Preisabfrage; Zwischengespeichertes ist nicht eingerechnet.
+  $('qobuz-info').textContent = pending.length
+    ? `${pending.length} Titel, Dauer etwa ${duration(pending.length * 2 * QOBUZ_INTERVAL_MS)} – günstigste Qualitätsstufe, braucht „npm start“.`
+    : '';
 }
 
 // ---------- Import ----------
@@ -438,7 +467,7 @@ function notifyDone(text) {
 
 async function runSearch() {
   if (state.running) {
-    state.running.abort();
+    if (state.runningKind === 'itunes') state.running.abort();
     return;
   }
   const pending = pendingTracks();
@@ -450,6 +479,8 @@ async function runSearch() {
 
   const controller = new AbortController();
   state.running = controller;
+  state.runningKind = 'itunes';
+  $('qobuz-start').disabled = true;
   const button = $('start');
   button.textContent = 'Pause';
   button.classList.add('secondary');
@@ -508,9 +539,66 @@ async function runSearch() {
     etaMs = 0;
     showProgress();
     state.running = null;
+    state.runningKind = null;
     button.classList.remove('secondary');
     $('country').disabled = false;
     await saveResults(true);
+    renderResults();
+    updateEstimate();
+    renderCacheInfo();
+  }
+}
+
+async function runQobuz() {
+  if (state.running) {
+    if (state.runningKind === 'qobuz') state.running.abort();
+    return;
+  }
+  const pending = qobuzPending();
+  if (!pending.length) return;
+
+  const controller = new AbortController();
+  state.running = controller;
+  state.runningKind = 'qobuz';
+  const button = $('qobuz-start');
+  button.textContent = 'Pause';
+  button.classList.add('secondary');
+  $('start').disabled = true;
+  $('country').disabled = true;
+  showError('search-error', null);
+  $('progress').hidden = false;
+  const text = $('progress-text');
+  text.textContent = 'Starte Qobuz-Suche …';
+  $('progress-fill').style.width = '0%';
+
+  const cacheTtlMs = state.cacheDays > 0 ? state.cacheDays * 24 * 60 * 60 * 1000 : Infinity;
+  const client = new QobuzClient({ locale: QOBUZ_LOCALE[state.country], store: state.store, cacheTtlMs });
+  try {
+    await matchQobuz(pending, client, {
+      signal: controller.signal,
+      onResult: (result, done, total) => {
+        state.qobuz.set(result.track.id, result);
+        saveQobuz();
+        $('progress-fill').style.width = `${Math.round((done / total) * 100)}%`;
+        text.textContent = `Qobuz ${done} von ${total}: ${result.track.artists[0] ?? ''} – ${result.track.name}`;
+        renderResults();
+      },
+    });
+    const found = pending.filter(t => state.qobuz.get(t.id)?.match).length;
+    text.textContent = `Fertig: ${found} von ${pending.length} Titeln bei Qobuz gefunden.`;
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      text.textContent = 'Qobuz-Suche pausiert. „Bei Qobuz weitersuchen“ macht dort weiter.';
+    } else {
+      showError('search-error', err.message);
+      text.textContent = 'Qobuz-Suche abgebrochen.';
+    }
+  } finally {
+    state.running = null;
+    state.runningKind = null;
+    button.classList.remove('secondary');
+    $('country').disabled = false;
+    saveQobuz();
     renderResults();
     updateEstimate();
     renderCacheInfo();
@@ -552,8 +640,10 @@ function setupCache() {
     if (!confirm('Alle gespeicherten Abfrageergebnisse löschen? Die nächste Suche fragt dann alles neu bei iTunes ab.')) return;
     try { await state.store.clear('cache'); } catch { /* s. o. */ }
     state.results.clear();
+    state.qobuz.clear();
     state.artistSites.clear();
     await saveResults(true);
+    saveQobuz();
     $('progress').hidden = true;
     renderResults();
     updateEstimate();
@@ -589,6 +679,7 @@ function setupSearch() {
   setupSubPrice();
   setupCache();
   $('start').addEventListener('click', runSearch);
+  $('qobuz-start').addEventListener('click', runQobuz);
   $('country').addEventListener('change', () => {
     state.country = $('country').value;
     local(COUNTRY_KEY, state.country);
@@ -597,7 +688,9 @@ function setupSearch() {
     renderSubPrice();
     // Preise gelten pro Land – bisherige Ergebnisse passen nicht mehr.
     state.results.clear();
+    state.qobuz.clear();
     saveResults(true);
+    saveQobuz();
     $('progress').hidden = true;
     renderResults();
     updateEstimate();
@@ -618,9 +711,10 @@ function setupSearch() {
 function renderResults() {
   const results = visibleTracks().map(t => state.results.get(t.id)).filter(Boolean);
   $('tracks').hidden = !state.tracks.length;
-  $('purchase').hidden = !results.length;
   const plan = buildPurchasePlan(results, state.owned);
   renderTrackRows(plan);
+  renderQobuzStat();
+  $('purchase').hidden = !results.length && !qobuzFound().length;
   if (!results.length) return;
 
   $('purchase-note').hidden = pendingTracks().length === 0;
@@ -731,6 +825,20 @@ function isBuyable(r) {
   return Boolean(r?.match && hasPrice(r.match));
 }
 
+/** Qobuz-Treffer der sichtbaren, nicht schon vorhandenen Titel. */
+function qobuzFound() {
+  return visibleTracks().filter(t => !state.owned.has(t.id)).map(t => state.qobuz.get(t.id)).filter(r => r?.match);
+}
+
+function renderQobuzStat() {
+  const searched = visibleTracks().filter(t => !state.owned.has(t.id) && state.qobuz.has(t.id)).length;
+  const found = qobuzFound();
+  $('qobuz-stats').replaceChildren(...(searched ? [
+    stat('Bei Qobuz (günstigste Stufe)', money(found.reduce((s, r) => s + r.match.price, 0), found[0]?.match.currency)),
+    stat('Bei Qobuz gefunden', `${found.length} / ${searched}`),
+  ] : []));
+}
+
 function stat(label, value, highlight) {
   return el('div', { class: highlight ? 'stat highlight' : 'stat' },
     el('span', { class: 'stat-label' }, label),
@@ -797,7 +905,7 @@ function renderTrackRows(plan) {
       group = first;
       const count = visibleTracks().filter(x => x.playlists?.[0] === first).length;
       rows.push(el('tr', { class: 'group' },
-        el('th', { colspan: 6, scope: 'colgroup' }, first ?? 'Ohne Playlist', el('span', { class: 'count' }, ` · ${count} Titel`))));
+        el('th', { colspan: 7, scope: 'colgroup' }, first ?? 'Ohne Playlist', el('span', { class: 'count' }, ` · ${count} Titel`))));
     }
     rows.push(trackRow(t, buyCell));
   }
@@ -811,6 +919,21 @@ function buyColumn(t, r, item, currency) {
   if (!isBuyable(r) || !item) return cell('–');
   if (item.type === 'album') return cell(el('span', { class: 'tag info' }, 'Album'), el('span', { class: 'sub' }, `„${item.title}“ (siehe oben)`));
   return cell(el('span', { class: 'price' }, money(item.price, currency)), link(item.url, 'Bei iTunes', 'buy'));
+}
+
+/** Qobuz-Spalte: günstigster Einzelpreis mit Link auf das Album bei Qobuz. */
+function qobuzCell(t) {
+  const q = state.qobuz.get(t.id);
+  const cell = (...children) => el('td', { class: 'col-buy' }, ...children);
+  if (state.owned.has(t.id) || !q) return cell();
+  if (!q.match) return cell('–');
+  const m = q.match;
+  const [cls, label] = CONFIDENCE_TAG[q.confidence];
+  return cell(
+    el('span', { class: 'price' }, money(m.price, m.currency)),
+    link(m.albumUrl, 'Bei Qobuz', 'buy'),
+    ' ', el('span', { class: `tag ${cls}`, title: `Übereinstimmung ${Math.round(q.score * 100)} %` }, label),
+    el('span', { class: 'sub' }, `${m.label} · ${m.artistName} – ${m.trackName}`));
 }
 
 function trackRow(t, buyCell) {
@@ -863,6 +986,7 @@ function trackRow(t, buyCell) {
     el('td', { class: 'col-num' }, playCount(t) === null ? '–' : `${playCount(t)}×`),
     found,
     buyCell(t, r),
+    qobuzCell(t),
     el('td', {}, shopLinks(term, 'track')));
 }
 
